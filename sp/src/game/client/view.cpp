@@ -62,6 +62,7 @@
 	
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+#include <directorscut_shared.h>
 		  
 void ToolFramework_AdjustEngineViewport( int& x, int& y, int& width, int& height );
 bool ToolFramework_SetupEngineView( Vector &origin, QAngle &angles, float &fov );
@@ -725,6 +726,8 @@ void CViewRender::SetUpViews()
 	// give the toolsystem a chance to override the view
 	ToolFramework_SetupEngineView( view.origin, view.angles, view.fov );
 
+	DirectorsCutGameSystem().SetupEngineView(view.origin, view.angles, view.fov);
+
 	if ( engine->IsPlayingDemo() )
 	{
 		if ( cl_demoviewoverride.GetFloat() > 0.0f )
@@ -1066,8 +1069,8 @@ void CViewRender::SetUpOverView()
 //-----------------------------------------------------------------------------
 void CViewRender::Render( vrect_t *rect )
 {
-	Assert(s_DbgSetupOrigin == m_View.origin);
-	Assert(s_DbgSetupAngles == m_View.angles);
+	//Assert(s_DbgSetupOrigin == m_View.origin);
+	//Assert(s_DbgSetupAngles == m_View.angles);
 
 	VPROF_BUDGET( "CViewRender::Render", "CViewRender::Render" );
 	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );

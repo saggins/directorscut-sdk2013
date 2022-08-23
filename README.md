@@ -4,6 +4,7 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 
 ## References
 
+- [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)
 - [Dear Imgui](https://github.com/ocornut/imgui)
 - [Mapbase](https://github.com/mapbase-source/source-sdk-2013)
 - [Source SDK 2013](https://github.com/ValveSoftware/source-sdk-2013)

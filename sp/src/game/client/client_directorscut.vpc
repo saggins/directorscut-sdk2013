@@ -134,6 +134,22 @@ $Project "Client (Director's Cut)"
 		$Folder	"Director's Cut"
 		{
 			$File "$SRCDIR\game\shared\directorscut\directorscut_shared.cpp"
+			$File "$SRCDIR\game\shared\directorscut\directorscut_shared.h"
+
+			$Folder	"Imguizmo"
+			{
+				$File "directorscut\imguizmo\GraphEditor.cpp"
+				$File "directorscut\imguizmo\GraphEditor.h"
+				$File "directorscut\imguizmo\ImCurveEdit.cpp"
+				$File "directorscut\imguizmo\ImCurveEdit.h"
+				$File "directorscut\imguizmo\ImGradient.cpp"
+				$File "directorscut\imguizmo\ImGradient.h"
+				$File "directorscut\imguizmo\ImGuizmo.cpp"
+				$File "directorscut\imguizmo\ImGuizmo.h"
+				$File "directorscut\imguizmo\ImSequencer.cpp"
+				$File "directorscut\imguizmo\ImSequencer.h"
+				$File "directorscut\imguizmo\ImZoomSlider.h"
+			}
 		}
 	}
 }
