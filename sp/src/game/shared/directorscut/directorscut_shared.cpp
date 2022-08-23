@@ -69,6 +69,8 @@ WNDPROC ogWndProc = nullptr;
 HWND hwnd = nullptr;
 LPDIRECT3DDEVICE9 d3dDevice = NULL;
 
+bool hooked = false;
+
 ConVar cvar_imgui_enabled("dx_imgui_enabled", "1", FCVAR_ARCHIVE, "Enable ImGui");
 ConVar cvar_imgui_input_enabled("dx_imgui_input_enabled", "1", FCVAR_ARCHIVE, "Capture ImGui input");
 
@@ -108,8 +110,22 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		ImGui::ShowDemoWindow();
 
 		ImGui::Begin("Camera");
+		
+		float setPivot[3];
+		
+		setPivot[0] = g_DirectorsCutSystem.pivot.x;
+		setPivot[1] = g_DirectorsCutSystem.pivot.y;
+		setPivot[2] = g_DirectorsCutSystem.pivot.z;
+		
+		ImGui::LabelText("Origin", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineOrigin.x, g_DirectorsCutSystem.engineOrigin.y, g_DirectorsCutSystem.engineOrigin.z);
+		ImGui::LabelText("Angles", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineAngles.x, g_DirectorsCutSystem.engineAngles.y, g_DirectorsCutSystem.engineAngles.z);
+		ImGui::SliderFloat3("Pivot", setPivot, -1000.0f, 1000.0f, "%.0f");
+		ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
+		ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 1, 1000.0f, "%.0f");
 
-		ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 0.0f, 1000.0f);
+		g_DirectorsCutSystem.pivot.x = setPivot[0];
+		g_DirectorsCutSystem.pivot.y = setPivot[1];
+		g_DirectorsCutSystem.pivot.z = setPivot[2];
 
 		ImGui::End();
 
@@ -396,21 +412,30 @@ void CDirectorsCutSystem::SetupEngineView(Vector& origin, QAngle& angles, float&
 	}
 
 	// Apply matrix to angles
-	QAngle engineAngles;
 	MatrixTranspose(cameraVMatrix, cameraVMatrix);
 	MatrixAngles(cameraVMatrix, engineAngles);
 
-	// TODO: Fix bad matrix angles, need these to inverse themselves
-	angles.x = -engineAngles.z;
-	angles.y = engineAngles.x;
-	angles.z = -engineAngles.y;
+	// TODO: Fix bad matrix angles
+	if (engineAngles.y == 180)
+	{
+		angles.x = engineAngles.z;
+		angles.y = -engineAngles.x;
+		angles.z = engineAngles.y;
+	}
+	else
+	{
+		angles.x = -engineAngles.z;
+		angles.y = engineAngles.x;
+		angles.z = -engineAngles.y;
+	}
 
 	// Rotate origin around pivot point with distance
 	Vector pivot = this->pivot;
 	float distance = this->distance;
 	Vector forward, right, up;
 	AngleVectors(angles, &forward, &right, &up);
-	origin = pivot - (forward * distance);
+	engineOrigin = pivot - (forward * distance);
+	origin = engineOrigin;
 }
 
 const char* REL_JMP = "\xE9";
@@ -534,6 +559,10 @@ void* WINAPI hookFn(char* hookedFn, char* hookFn, int copyBytesSize, unsigned ch
 void CDirectorsCutSystem::LevelInitPreEntity()
 {
 #ifdef CLIENT_DLL
+	if (hooked)
+		return;
+	hooked = true;
+	
 	float newCameraMatrix[16] =
 	{ 1.f, 0.f, 0.f, 0.f,
 	  0.f, 1.f, 0.f, 0.f,
@@ -549,7 +578,8 @@ void CDirectorsCutSystem::LevelInitPreEntity()
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	ImGui::StyleColorsDark();
-	hwnd = GetForegroundWindow();
+	// Find hl2.exe
+	hwnd = FindWindowA("Valve001", NULL);
 	ImGui_ImplWin32_Init(hwnd);
 	bool deviceGot = GetD3D9Device();
 	if (deviceGot)

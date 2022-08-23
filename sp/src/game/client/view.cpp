@@ -813,8 +813,8 @@ void CViewRender::SetUpViews()
 	ToolFramework_SetupAudioState( audioState );
 
     // TomF: I wonder when the audio tools modify this, if ever...
-    Assert ( view.origin == audioState.m_Origin );
-    Assert ( view.angles == audioState.m_Angles );
+    //Assert ( view.origin == audioState.m_Origin );
+    //Assert ( view.angles == audioState.m_Angles );
 	view.origin = audioState.m_Origin;
 	view.angles = audioState.m_Angles;
 

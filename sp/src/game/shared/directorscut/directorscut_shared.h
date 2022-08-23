@@ -36,6 +36,8 @@ public:
 	float distance = 8.f;
 	float fov = 90;
 	Vector pivot;
+	Vector engineOrigin;
+	QAngle engineAngles;
 #endif
 };
 
