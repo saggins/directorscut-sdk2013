@@ -9,7 +9,10 @@
 #define _DIRECTORSCUT_SHARED_H_
 
 #include "igamesystem.h"
+
+#ifdef CLIENT_DLL
 #include "mathlib/vector.h"
+#endif
 
 class CDirectorsCutSystem : public CAutoGameSystemPerFrame
 {
@@ -23,21 +26,25 @@ public:
 	{
 		return true;
 	}
-
-	virtual void Update(float frametime);
+	
 #ifdef CLIENT_DLL
-	virtual void LevelInitPreEntity();
+	virtual void PostInit();
+	virtual void Shutdown();
+	virtual void LevelInitPostEntity();
+	virtual void LevelShutdownPostEntity();
+	virtual void Update(float frametime);
 	void SetupEngineView(Vector &origin, QAngle &angles, float &fov);
-	bool GetD3D9Device();
-	
 	float cameraView[16];
-	
-	char* d3d9DeviceTable[119];
 	float distance = 8.f;
 	float fov = 90;
 	Vector pivot;
 	Vector engineOrigin;
+	Vector playerOrigin;
 	QAngle engineAngles;
+	bool firstEndScene = true;
+	bool cursorState = false;
+	bool imguiActive = false;
+	bool levelInit = false;
 #endif
 };
 

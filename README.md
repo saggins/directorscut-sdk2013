@@ -8,6 +8,39 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 - [Twitter](https://twitter.com/SFMDirectorsCut)
 - [Discord](discord.gg/3X3teNecWs)
 
+## Building
+
+1. Use the Visual Studio command prompt to execute these commands:
+
+```batch
+git clone https://github.com/TeamPopplio/directorscut.git
+directorscut\sp\src\createdirectorscut.bat
+git clone https://github.com/TeamPopplio/ImGui-CMake-Installer-v1.88.git
+cd ImGui-CMake-Installer-v1.88
+git checkout vs2013
+mkdir build
+cd build
+cmake .. -G "Visual Studio 12 2013" -A Win32 -DIMGUI_STATIC_LIBRARY=OFF -DIMGUI_IMPL_DX9=ON
+cmake --build . --config Release
+mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..\..\directorscut\sp\game\directorscut
+```
+
+1. Copy `bin\Release\imgui.dll` to the `directorscut\sp\game\directorscut\bin` folder.
+
+1. Download the [Mapbase v6.3](https://www.moddb.com/mods/mapbase/downloads/mapbase-release-build) release.
+
+1. Place the Mapbase folders in your `sourcemods` folder.
+
+1. Copy `discord-rpc.dll` from the Mapbase release to the `directorscut\sp\game\directorscut\bin` folder.
+
+1. Copy `game_shader_dx9.dll` from the Mapbase release to the `directorscut\sp\game\directorscut\bin` folder.
+
+1. Open `directorscut\sp\src\directorscut.sln` in Visual Studio.
+
+1. Build the project as a Release build.
+
+1. Restart Steam and run the game.
+
 ## References
 
 - [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)

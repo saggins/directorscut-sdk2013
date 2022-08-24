@@ -1,0 +1,10 @@
+"MapbaseRPC"
+{
+	// Discord application ID
+	// Change this if you want something other than "Mapbase" to show up on players' Discord clients.
+	discord_appid "1011818709444214864"
+
+
+	discord_largeimage "directorscut"
+	discord_largeimage_text "https://github.com/TeamPopplio/directorscut"
+}

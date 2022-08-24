@@ -10,39 +10,10 @@
 #include "directorscut_shared.h"
 
 #ifdef CLIENT_DLL
-#include "imgui.h"
-
-#undef RegSetValueEx
-#undef RegSetValue
-#undef RegQueryValueEx
-#undef RegQueryValue
-#undef RegOpenKeyEx
-#undef RegOpenKey
-#undef RegCreateKeyEx
-#undef RegCreateKey
-#undef ReadConsoleInput
-#undef INVALID_HANDLE_VALUE
-#undef GetCommandLine
-
-#include "imguizmo/imguizmo.h"
-#include "imgui_impl_dx9.h"
-#include "imgui_impl_win32.h"
-#include <d3d9.h>
-#include <string>
-
-#include "hud.h"
-#include "hudelement.h"
-#include "iclientmode.h"
-#include <KeyValues.h>
-#include <vgui/ISurface.h>
-#include <vgui/IScheme.h>
-#include <vgui/ILocalize.h>
-#include <vgui_controls/AnimationController.h>
-#include <vgui_controls/Panel.h>
-#include <vgui/IPanel.h>
-#include "vgui_int.h"
-#include "input.h"
-#include "iinput.h"
+#include "imgui_public.h"
+#include "direct3d_hook.h"
+#include "vgui/ISurface.h"
+#include "vgui_controls/Panel.h"
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -56,21 +27,6 @@ CDirectorsCutSystem &DirectorsCutGameSystem()
 }
 
 #ifdef CLIENT_DLL
-typedef HRESULT(APIENTRY* endSceneFunc)(LPDIRECT3DDEVICE9 pDevice);
-typedef HRESULT(APIENTRY* wndProcFunc)(const HWND hWnd, const UINT msg, const WPARAM wParam, const LPARAM lParam);
-
-endSceneFunc trampEndScene = nullptr;
-
-char* ogEndSceneAddress;
-unsigned char endSceneBytes[7];
-
-WNDPROC ogWndProc = nullptr;
-
-HWND hwnd = nullptr;
-LPDIRECT3DDEVICE9 d3dDevice = NULL;
-
-bool hooked = false;
-
 ConVar cvar_imgui_enabled("dx_imgui_enabled", "1", FCVAR_ARCHIVE, "Enable ImGui");
 ConVar cvar_imgui_input_enabled("dx_imgui_input_enabled", "1", FCVAR_ARCHIVE, "Capture ImGui input");
 
@@ -82,23 +38,19 @@ ConCommand cmd_imgui_input_toggle("dx_imgui_input_toggle", [](const CCommand& ar
 	cvar_imgui_input_enabled.SetValue(!cvar_imgui_input_enabled.GetBool());
 }, "Toggle ImGui input", FCVAR_ARCHIVE);
 
-bool cursorState = false;
-
-#endif
+WNDPROC ogWndProc = nullptr;
 
 //static ImGuizmo::OPERATION mCurrentGizmoOperation(ImGuizmo::TRANSLATE);
 
-#ifdef CLIENT_DLL
-
 void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 {
-	if (!d3dDevice)
+	if (g_DirectorsCutSystem.firstEndScene)
 	{
-		d3dDevice = p_pDevice;
-		ImGui_ImplDX9_Init(p_pDevice);
+		g_DirectorsCutSystem.firstEndScene = false;
+		if(g_DirectorsCutSystem.imguiActive)
+			ImGui_ImplDX9_Init(p_pDevice);
 	}
-
-	if (cvar_imgui_enabled.GetBool())
+	if (cvar_imgui_enabled.GetBool() && g_DirectorsCutSystem.imguiActive)
 	{
 		ImGui_ImplDX9_NewFrame();
 		ImGui_ImplWin32_NewFrame();
@@ -107,35 +59,42 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		ImGuizmo::BeginFrame();
 
 		// Drawing
-		ImGui::ShowDemoWindow();
+		//Gui::ShowDemoWindow();
 
-		ImGui::Begin("Camera");
+		ImGui::Begin("Camera", 0, ImGuiWindowFlags_AlwaysAutoResize);
+
+		ImGui::LabelText("Origin", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineOrigin.x, g_DirectorsCutSystem.engineOrigin.y, g_DirectorsCutSystem.engineOrigin.z);
+		ImGui::LabelText("Angles", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineAngles.x, g_DirectorsCutSystem.engineAngles.y, g_DirectorsCutSystem.engineAngles.z);
 		
+		if (ImGui::Button("Player camera to pivot"))
+		{
+			C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
+			if (pPlayer)
+			{
+				g_DirectorsCutSystem.pivot = g_DirectorsCutSystem.playerOrigin;
+			}
+		}
+
 		float setPivot[3];
-		
 		setPivot[0] = g_DirectorsCutSystem.pivot.x;
 		setPivot[1] = g_DirectorsCutSystem.pivot.y;
 		setPivot[2] = g_DirectorsCutSystem.pivot.z;
-		
-		ImGui::LabelText("Origin", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineOrigin.x, g_DirectorsCutSystem.engineOrigin.y, g_DirectorsCutSystem.engineOrigin.z);
-		ImGui::LabelText("Angles", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineAngles.x, g_DirectorsCutSystem.engineAngles.y, g_DirectorsCutSystem.engineAngles.z);
 		ImGui::SliderFloat3("Pivot", setPivot, -1000.0f, 1000.0f, "%.0f");
-		ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
-		ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 1, 1000.0f, "%.0f");
-
 		g_DirectorsCutSystem.pivot.x = setPivot[0];
 		g_DirectorsCutSystem.pivot.y = setPivot[1];
 		g_DirectorsCutSystem.pivot.z = setPivot[2];
 
-		ImGui::End();
+		ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
+		ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 1, 1000.0f, "%.0f");
 
-		ImGuiIO& io = ImGui::GetIO(); (void)io;
+		ImGui::End();
 
 		int windowWidth;
 		int windowHeight;
+		
 		vgui::surface()->GetScreenSize(windowWidth, windowHeight);
 		
-		ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+		ImGuizmo::SetRect(0, 0, windowWidth, windowHeight);
 
 		ImGuizmo::ViewManipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.distance, ImVec2(windowWidth - 192, 0), ImVec2(192, 192), 0x10101010);
 
@@ -144,8 +103,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		ImGui::Render();
 		ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
 	}
-	
-	trampEndScene(d3dDevice);
+	trampEndScene(p_pDevice);
 }
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -159,12 +117,143 @@ LRESULT WINAPI WndProc(const HWND hWnd, const UINT msg, const WPARAM wParam, con
 	return CallWindowProc(ogWndProc, hWnd, msg, wParam, lParam);
 }
 
-#endif
+void CDirectorsCutSystem::SetupEngineView(Vector& origin, QAngle& angles, float& fov)
+{
+	if (levelInit && cvar_imgui_input_enabled.GetBool())
+	{
+		fov = this->fov;
+		matrix_t_dx cameraDxMatrix = *(matrix_t_dx*)cameraView;
+		matrix3x4_t cameraVMatrix;
+
+		// Convert ImGuizmo matrix to matrix3x4_t
+		for (int i = 0; i < 3; i++)
+		{
+			for (int j = 0; j < 4; j++)
+			{
+				cameraVMatrix[i][j] = cameraDxMatrix.m[i][j];
+			}
+		}
+
+		// Apply matrix to angles
+		MatrixTranspose(cameraVMatrix, cameraVMatrix);
+		MatrixAngles(cameraVMatrix, engineAngles);
+
+		// TODO: Fix bad matrix angles
+		if (engineAngles.y == 180)
+		{
+			angles.x = engineAngles.z;
+			angles.y = -engineAngles.x;
+			angles.z = engineAngles.y;
+		}
+		else
+		{
+			angles.x = -engineAngles.z;
+			angles.y = engineAngles.x;
+			angles.z = -engineAngles.y;
+		}
+
+		// Rotate origin around pivot point with distance
+		Vector pivot = this->pivot;
+		float distance = this->distance;
+		Vector forward, right, up;
+		AngleVectors(angles, &forward, &right, &up);
+		engineOrigin = pivot - (forward * distance);
+		origin = engineOrigin;
+	}
+	else
+	{
+		playerOrigin = origin;
+	}
+}
+
+void CDirectorsCutSystem::PostInit()
+{
+	float newCameraMatrix[16] =
+	{ 1.f, 0.f, 0.f, 0.f,
+	  0.f, 1.f, 0.f, 0.f,
+	  0.f, 0.f, 1.f, 0.f,
+	  0.f, 0.f, 0.f, 1.f };
+	for (int i = 0; i < 16; i++)
+	{
+		cameraView[i] = newCameraMatrix[i];
+	}
+	// Hook Direct3D in hl2.exe
+	Msg("Director's Cut: Hooking Direct3D...\n");
+	HWND hwnd = FindWindowA("Valve001", NULL);
+	CDirect3DHook direct3DHook = GetDirect3DHook();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	ImGui::StyleColorsDark();
+	ImGui_ImplWin32_Init(hwnd);
+	imguiActive = true;
+	char* endSceneChar = reinterpret_cast<char*>(&EndScene);
+	int hooked = direct3DHook.Hook(hwnd, endSceneChar);
+	switch (hooked)
+	{
+		case 0: // No error
+			ogWndProc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)WndProc);
+			Msg("Director's Cut: System loaded\n");
+			break;
+		case 1: // Already hooked
+			Msg("Director's Cut: System already hooked\n");
+			break;
+		case 2: // Unable to hook endscene
+			Msg("Director's Cut: Unable to hook endscene\n");
+			break;
+		case 4: // Invalid HWND
+			Msg("Director's Cut: System failed to load - Invalid HWND\n");
+			break;
+		case 5: // Invalid device table
+			Msg("Director's Cut: System failed to load - Invalid device table\n");
+			break;
+		case 6: // Could not find Direct3D system
+			Msg("Director's Cut: System failed to load - Could not find Direct3D system\n");
+			break;
+		case 7: // Failed to create Direct3D device
+			Msg("Director's Cut: System failed to load - Failed to create Direct3D device\n");
+			break;
+		case 3: // Future error
+		default: // Unknown error
+			Msg("Director's Cut: System failed to load - Unknown error\n");
+			break;
+	}
+	// Unload Dear ImGui on nonzero
+	if (hooked != 0)
+	{
+		ImGui_ImplDX9_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext();
+		imguiActive = false;
+	}
+}
+
+void CDirectorsCutSystem::Shutdown()
+{
+	if (imguiActive)
+	{
+		// Unload Dear ImGui
+		ImGui_ImplDX9_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext();
+		imguiActive = false;
+	}
+	// Unhook
+	CDirect3DHook direct3DHook = GetDirect3DHook();
+	direct3DHook.Unhook();
+}
+
+void CDirectorsCutSystem::LevelInitPostEntity()
+{
+	levelInit = true;
+}
+
+void CDirectorsCutSystem::LevelShutdownPostEntity()
+{
+	levelInit = false;
+}
 
 void CDirectorsCutSystem::Update(float frametime)
 {
-#ifdef CLIENT_DLL
-	// TODO: Figure out if this is still necessary
 	bool newState = (cvar_imgui_enabled.GetBool() && cvar_imgui_input_enabled.GetBool());
 	if (cursorState != newState)
 	{
@@ -185,434 +274,6 @@ void CDirectorsCutSystem::Update(float frametime)
 			vgui::surface()->SurfaceSetCursorPos(x, y);
 		}
 	}
-#endif
 }
 
-#ifdef CLIENT_DLL
-
-void FPU_MatrixF_x_MatrixF(const float* a, const float* b, float* r)
-{
-	r[0] = a[0] * b[0] + a[1] * b[4] + a[2] * b[8] + a[3] * b[12];
-	r[1] = a[0] * b[1] + a[1] * b[5] + a[2] * b[9] + a[3] * b[13];
-	r[2] = a[0] * b[2] + a[1] * b[6] + a[2] * b[10] + a[3] * b[14];
-	r[3] = a[0] * b[3] + a[1] * b[7] + a[2] * b[11] + a[3] * b[15];
-
-	r[4] = a[4] * b[0] + a[5] * b[4] + a[6] * b[8] + a[7] * b[12];
-	r[5] = a[4] * b[1] + a[5] * b[5] + a[6] * b[9] + a[7] * b[13];
-	r[6] = a[4] * b[2] + a[5] * b[6] + a[6] * b[10] + a[7] * b[14];
-	r[7] = a[4] * b[3] + a[5] * b[7] + a[6] * b[11] + a[7] * b[15];
-
-	r[8] = a[8] * b[0] + a[9] * b[4] + a[10] * b[8] + a[11] * b[12];
-	r[9] = a[8] * b[1] + a[9] * b[5] + a[10] * b[9] + a[11] * b[13];
-	r[10] = a[8] * b[2] + a[9] * b[6] + a[10] * b[10] + a[11] * b[14];
-	r[11] = a[8] * b[3] + a[9] * b[7] + a[10] * b[11] + a[11] * b[15];
-
-	r[12] = a[12] * b[0] + a[13] * b[4] + a[14] * b[8] + a[15] * b[12];
-	r[13] = a[12] * b[1] + a[13] * b[5] + a[14] * b[9] + a[15] * b[13];
-	r[14] = a[12] * b[2] + a[13] * b[6] + a[14] * b[10] + a[15] * b[14];
-	r[15] = a[12] * b[3] + a[13] * b[7] + a[14] * b[11] + a[15] * b[15];
-}
-
-struct matrix_t_dx;
-
-struct vec_t_dx
-{
-public:
-	float x, y, z, w;
-
-	void Lerp(const vec_t_dx& v, float t)
-	{
-		x += (v.x - x) * t;
-		y += (v.y - y) * t;
-		z += (v.z - z) * t;
-		w += (v.w - w) * t;
-	}
-
-	void Set(float v) { x = y = z = w = v; }
-	void Set(float _x, float _y, float _z = 0.f, float _w = 0.f) { x = _x; y = _y; z = _z; w = _w; }
-
-	vec_t_dx& operator -= (const vec_t_dx& v) { x -= v.x; y -= v.y; z -= v.z; w -= v.w; return *this; }
-	vec_t_dx& operator += (const vec_t_dx& v) { x += v.x; y += v.y; z += v.z; w += v.w; return *this; }
-	vec_t_dx& operator *= (const vec_t_dx& v) { x *= v.x; y *= v.y; z *= v.z; w *= v.w; return *this; }
-	vec_t_dx& operator *= (float v) { x *= v;    y *= v;    z *= v;    w *= v;    return *this; }
-
-	vec_t_dx operator * (float f) const;
-	vec_t_dx operator - () const;
-	vec_t_dx operator - (const vec_t_dx& v) const;
-	vec_t_dx operator + (const vec_t_dx& v) const;
-	vec_t_dx operator * (const vec_t_dx& v) const;
-
-	const vec_t_dx& operator + () const { return (*this); }
-	float Length() const { return sqrtf(x * x + y * y + z * z); };
-	float LengthSq() const { return (x * x + y * y + z * z); };
-	vec_t_dx Normalize() { (*this) *= (1.f / (Length() > FLT_EPSILON ? Length() : FLT_EPSILON)); return (*this); }
-	vec_t_dx Normalize(const vec_t_dx& v) { this->Set(v.x, v.y, v.z, v.w); this->Normalize(); return (*this); }
-	vec_t_dx Abs() const;
-
-	void Cross(const vec_t_dx& v)
-	{
-		vec_t_dx res;
-		res.x = y * v.z - z * v.y;
-		res.y = z * v.x - x * v.z;
-		res.z = x * v.y - y * v.x;
-
-		x = res.x;
-		y = res.y;
-		z = res.z;
-		w = 0.f;
-	}
-
-	void Cross(const vec_t_dx& v1, const vec_t_dx& v2)
-	{
-		x = v1.y * v2.z - v1.z * v2.y;
-		y = v1.z * v2.x - v1.x * v2.z;
-		z = v1.x * v2.y - v1.y * v2.x;
-		w = 0.f;
-	}
-
-	float Dot(const vec_t_dx& v) const
-	{
-		return (x * v.x) + (y * v.y) + (z * v.z) + (w * v.w);
-	}
-
-	float Dot3(const vec_t_dx& v) const
-	{
-		return (x * v.x) + (y * v.y) + (z * v.z);
-	}
-
-	void Transform(const matrix_t_dx& matrix);
-	void Transform(const vec_t_dx& s, const matrix_t_dx& matrix);
-
-	void TransformVector(const matrix_t_dx& matrix);
-	void TransformPoint(const matrix_t_dx& matrix);
-	void TransformVector(const vec_t_dx& v, const matrix_t_dx& matrix) { (*this) = v; this->TransformVector(matrix); }
-	void TransformPoint(const vec_t_dx& v, const matrix_t_dx& matrix) { (*this) = v; this->TransformPoint(matrix); }
-
-	float& operator [] (size_t index) { return ((float*)&x)[index]; }
-	const float& operator [] (size_t index) const { return ((float*)&x)[index]; }
-	bool operator!=(const vec_t_dx& other) const { return memcmp(this, &other, sizeof(vec_t_dx)) != 0; }
-};
-
-vec_t_dx makeVect(float _x, float _y, float _z = 0.f, float _w = 0.f) { vec_t_dx res; res.x = _x; res.y = _y; res.z = _z; res.w = _w; return res; }
-
-struct matrix_t_dx
-{
-public:
-
-	union
-	{
-		float m[4][4];
-		float m16[16];
-		struct
-		{
-			vec_t_dx right, up, dir, position;
-		} v;
-		vec_t_dx component[4];
-	};
-
-	operator float* () { return m16; }
-	operator const float* () const { return m16; }
-	void Translation(float _x, float _y, float _z) { this->Translation(makeVect(_x, _y, _z)); }
-
-	void Translation(const vec_t_dx& vt)
-	{
-		v.right.Set(1.f, 0.f, 0.f, 0.f);
-		v.up.Set(0.f, 1.f, 0.f, 0.f);
-		v.dir.Set(0.f, 0.f, 1.f, 0.f);
-		v.position.Set(vt.x, vt.y, vt.z, 1.f);
-	}
-
-	void Scale(float _x, float _y, float _z)
-	{
-		v.right.Set(_x, 0.f, 0.f, 0.f);
-		v.up.Set(0.f, _y, 0.f, 0.f);
-		v.dir.Set(0.f, 0.f, _z, 0.f);
-		v.position.Set(0.f, 0.f, 0.f, 1.f);
-	}
-	void Scale(const vec_t_dx& s) { Scale(s.x, s.y, s.z); }
-
-	matrix_t_dx& operator *= (const matrix_t_dx& mat)
-	{
-		matrix_t_dx tmpMat;
-		tmpMat = *this;
-		tmpMat.Multiply(mat);
-		*this = tmpMat;
-		return *this;
-	}
-	matrix_t_dx operator * (const matrix_t_dx& mat) const
-	{
-		matrix_t_dx matT;
-		matT.Multiply(*this, mat);
-		return matT;
-	}
-
-	void Multiply(const matrix_t_dx& matrix)
-	{
-		matrix_t_dx tmp;
-		tmp = *this;
-
-		FPU_MatrixF_x_MatrixF((float*)&tmp, (float*)&matrix, (float*)this);
-	}
-
-	void Multiply(const matrix_t_dx& m1, const matrix_t_dx& m2)
-	{
-		FPU_MatrixF_x_MatrixF((float*)&m1, (float*)&m2, (float*)this);
-	}
-
-	float GetDeterminant() const
-	{
-		return m[0][0] * m[1][1] * m[2][2] + m[0][1] * m[1][2] * m[2][0] + m[0][2] * m[1][0] * m[2][1] -
-			m[0][2] * m[1][1] * m[2][0] - m[0][1] * m[1][0] * m[2][2] - m[0][0] * m[1][2] * m[2][1];
-	}
-
-	float Inverse(const matrix_t_dx& srcMatrix, bool affine = false);
-	void SetToIdentity()
-	{
-		v.right.Set(1.f, 0.f, 0.f, 0.f);
-		v.up.Set(0.f, 1.f, 0.f, 0.f);
-		v.dir.Set(0.f, 0.f, 1.f, 0.f);
-		v.position.Set(0.f, 0.f, 0.f, 1.f);
-	}
-	void Transpose()
-	{
-		matrix_t_dx tmpm;
-		for (int l = 0; l < 4; l++)
-		{
-			for (int c = 0; c < 4; c++)
-			{
-				tmpm.m[l][c] = m[c][l];
-			}
-		}
-		(*this) = tmpm;
-	}
-
-	void RotationAxis(const vec_t_dx& axis, float angle);
-
-	void OrthoNormalize()
-	{
-		v.right.Normalize();
-		v.up.Normalize();
-		v.dir.Normalize();
-	}
-};
-
-void CDirectorsCutSystem::SetupEngineView(Vector& origin, QAngle& angles, float& fov)
-{
-	fov = this->fov;
-	matrix_t_dx cameraDxMatrix = *(matrix_t_dx*)cameraView;
-	matrix3x4_t cameraVMatrix;
-
-	// Convert ImGuizmo matrix to matrix3x4_t
-	for (int i = 0; i < 3; i++)
-	{
-		for (int j = 0; j < 4; j++)
-		{
-			cameraVMatrix[i][j] = cameraDxMatrix.m[i][j];
-		}
-	}
-
-	// Apply matrix to angles
-	MatrixTranspose(cameraVMatrix, cameraVMatrix);
-	MatrixAngles(cameraVMatrix, engineAngles);
-
-	// TODO: Fix bad matrix angles
-	if (engineAngles.y == 180)
-	{
-		angles.x = engineAngles.z;
-		angles.y = -engineAngles.x;
-		angles.z = engineAngles.y;
-	}
-	else
-	{
-		angles.x = -engineAngles.z;
-		angles.y = engineAngles.x;
-		angles.z = -engineAngles.y;
-	}
-
-	// Rotate origin around pivot point with distance
-	Vector pivot = this->pivot;
-	float distance = this->distance;
-	Vector forward, right, up;
-	AngleVectors(angles, &forward, &right, &up);
-	engineOrigin = pivot - (forward * distance);
-	origin = engineOrigin;
-}
-
-const char* REL_JMP = "\xE9";
-const char* NOP = "\x90";
-
-// 1 byte instruction +  4 bytes address
-const unsigned int SIZE_OF_REL_JMP = 5;
-
-bool CDirectorsCutSystem::GetD3D9Device()
-{
-	if (!hwnd || !this->d3d9DeviceTable) {
-		return false;
-	}
-
-	IDirect3D9* d3dSys = Direct3DCreate9(D3D_SDK_VERSION);
-
-	if (!d3dSys) {
-		return false;
-	}
-
-	IDirect3DDevice9* dummyDev = NULL;
-
-	// options to create dummy device
-	D3DPRESENT_PARAMETERS d3dpp = {};
-	d3dpp.Windowed = false;
-	d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-	d3dpp.hDeviceWindow = hwnd;
-
-	HRESULT dummyDeviceCreated = d3dSys->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3dpp.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &dummyDev);
-
-	if (dummyDeviceCreated != S_OK)
-	{
-		// may fail in windowed fullscreen mode, trying again with windowed mode
-		d3dpp.Windowed = ~d3dpp.Windowed;
-
-		dummyDeviceCreated = d3dSys->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, d3dpp.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &dummyDev);
-
-		if (dummyDeviceCreated != S_OK)
-		{
-			d3dSys->Release();
-			return false;
-		}
-	}
-
-	memcpy(this->d3d9DeviceTable, *reinterpret_cast<void***>(dummyDev), sizeof(this->d3d9DeviceTable));
-
-	dummyDev->Release();
-	d3dSys->Release();
-	return true;
-}
-
-// adapted from https://guidedhacking.com/threads/simple-x86-c-trampoline-hook.14188/
-// hookedFn: The function that's about to the hooked
-// hookFn: The function that will be executed before `hookedFn` by causing `hookFn` to take a detour
-void* WINAPI hookFn(char* hookedFn, char* hookFn, int copyBytesSize, unsigned char* backupBytes, std::string descr)
-{
-
-	if (copyBytesSize < 5)
-	{
-		// the function prologue of the hooked function
-		// should be of size 5 (or larger)
-		return nullptr;
-	}
-
-	//
-	// 1. Backup the original function prologue
-	//
-	if (!ReadProcessMemory(GetCurrentProcess(), hookedFn, backupBytes, copyBytesSize, 0))
-	{
-		return nullptr;
-	}
-
-	//
-	// 2. Setup the trampoline
-	// --> Cause `hookedFn` to return to `hookFn` without causing an infinite loop
-	// Otherwise calling `hookedFn` directly again would then call `hookFn` again, and so on :)
-	//
-	// allocate executable memory for the trampoline
-	// the size is (amount of bytes copied from the original function) + (size of a relative jump + address)
-
-	char* trampoline = (char*)VirtualAlloc(0, copyBytesSize + SIZE_OF_REL_JMP, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-
-	// steal the first `copyBytesSize` bytes from the original function
-	// these will be used to make the trampoline work
-	// --> jump back to `hookedFn` without executing `hookFn` again
-	memcpy(trampoline, hookedFn, copyBytesSize);
-	// append the relative JMP instruction after the stolen instructions
-	memcpy(trampoline + copyBytesSize, REL_JMP, sizeof(REL_JMP));
-
-	// calculate the offset between the hooked function and the trampoline
-	// --> distance between the trampoline and the original function `hookedFn`
-	// this will land directly *after* the inserted JMP instruction, hence subtracting 5
-	int hookedFnTrampolineOffset = hookedFn - trampoline - SIZE_OF_REL_JMP;
-	memcpy(trampoline + copyBytesSize + 1, &hookedFnTrampolineOffset, sizeof(hookedFnTrampolineOffset));
-
-	//
-	// 3. Detour the original function `hookedFn`
-	// --> cause `hookedFn` to execute `hookFn` first
-	// remap the first few bytes of the original function as RXW
-	DWORD oldProtect;
-	if (!VirtualProtect(hookedFn, copyBytesSize, PAGE_EXECUTE_READWRITE, &oldProtect))
-	{
-		return nullptr;
-	}
-
-	// best variable name ever
-	// calculate the size of the relative jump between the start of `hookedFn` and the start of `hookFn`.
-	int hookedFnHookFnOffset = hookFn - hookedFn - SIZE_OF_REL_JMP;
-
-	// Take a relative jump to `hookFn` at the beginning
-	// of course, `hookFn` has to expect the same parameter types and values
-	memcpy(hookedFn, REL_JMP, sizeof(REL_JMP));
-	memcpy(hookedFn + 1, &hookedFnHookFnOffset, sizeof(hookedFnHookFnOffset));
-
-	// restore the previous protection values
-	VirtualProtect(hookedFn, copyBytesSize, oldProtect, &oldProtect);
-
-	return trampoline;
-}
-
-void CDirectorsCutSystem::LevelInitPreEntity()
-{
-#ifdef CLIENT_DLL
-	if (hooked)
-		return;
-	hooked = true;
-	
-	float newCameraMatrix[16] =
-	{ 1.f, 0.f, 0.f, 0.f,
-	  0.f, 1.f, 0.f, 0.f,
-	  0.f, 0.f, 1.f, 0.f,
-	  0.f, 0.f, 0.f, 1.f };
-
-	for (int i = 0; i < 16; i++)
-	{
-		cameraView[i] = newCameraMatrix[i];
-	}
-
-	// Configure Dear Imgui
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO(); (void)io;
-	ImGui::StyleColorsDark();
-	// Find hl2.exe
-	hwnd = FindWindowA("Valve001", NULL);
-	ImGui_ImplWin32_Init(hwnd);
-	bool deviceGot = GetD3D9Device();
-	if (deviceGot)
-	{
-		ogEndSceneAddress = d3d9DeviceTable[42];
-		trampEndScene = (endSceneFunc)hookFn(ogEndSceneAddress, reinterpret_cast<char*>(&EndScene), 7, endSceneBytes, "EndScene");
-
-		ogWndProc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)WndProc);
-	}
-	CGMsg(0, CON_GROUP_MAPBASE_MISC, "Director's Cut system loaded\n");
-#endif
-}
-
-// Unhook le method
-BOOL WINAPI restore(char* fn, unsigned char* writeBytes, int writeSize, std::string descr)
-{
-	DWORD oldProtect;
-	if (!VirtualProtect(fn, writeSize, PAGE_EXECUTE_READWRITE, &oldProtect))
-	{
-		return FALSE;
-	}
-
-	if (!WriteProcessMemory(GetCurrentProcess(), fn, writeBytes, writeSize, 0))
-	{
-		return FALSE;
-	}
-
-	if (!VirtualProtect(fn, writeSize, oldProtect, &oldProtect))
-	{
-		return FALSE;
-	}
-
-	return TRUE;
-}
-	
 #endif
