@@ -99,6 +99,11 @@ public:
 	virtual		bool		CAM_IsOrthographic() const;
 	virtual		void		CAM_OrthographicSize( float& w, float& h ) const;
 
+	// fixed perspective/ortho switch
+	virtual		void		CAM_ToPerspective();
+	virtual		bool		CAM_IsPerspective() const;
+	virtual		void		CAM_SetOrthographicSize( float w, float h );
+
 	virtual		float		CAM_CapYaw( float fVal ) { return fVal; }
 	
 #if defined( HL2_CLIENT_DLL )

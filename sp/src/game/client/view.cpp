@@ -59,10 +59,10 @@
 #include "c_prop_portal.h" //portal surface rendering functions
 #endif
 
-	
+#include "directorscut.h"	
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
-#include <directorscut_shared.h>
 		  
 void ToolFramework_AdjustEngineViewport( int& x, int& y, int& width, int& height );
 bool ToolFramework_SetupEngineView( Vector &origin, QAngle &angles, float &fov );

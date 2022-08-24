@@ -133,12 +133,14 @@ $Project "Client (Director's Cut)"
 		
 		$Folder	"Director's Cut"
 		{
-			$File "$SRCDIR\game\shared\directorscut\directorscut_shared.cpp"
-			$File "$SRCDIR\game\shared\directorscut\directorscut_shared.h"
+			$File "directorscut\directorscut.cpp"
+			$File "directorscut\directorscut.h"
 			$File "directorscut\direct3d_hook.cpp"
 			$File "directorscut\direct3d_hook.h"
 			$File "directorscut\imgui_public.cpp"
 			$File "directorscut\imgui_public.h"
+			$File "directorscut\dag_entity.cpp"
+			$File "directorscut\dag_entity.h"
 			
 			$Folder	"Imguizmo"
 			{

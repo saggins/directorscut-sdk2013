@@ -301,8 +301,6 @@ $Project "Server (Director's Cut)"
 		
 		$Folder	"Director's Cut"
 		{
-			$File "$SRCDIR\game\shared\directorscut\directorscut_shared.cpp"
-			$File "$SRCDIR\game\shared\directorscut\directorscut_shared.h"
 		}
 	}
 }
