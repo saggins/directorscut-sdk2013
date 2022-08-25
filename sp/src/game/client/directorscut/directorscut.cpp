@@ -140,7 +140,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 		if (g_DirectorsCutSystem.useSnap)
 		{
-			ImGui::InputFloat3("Snap", &g_DirectorsCutSystem.snap);
+			ImGui::InputFloat3("Snap", g_DirectorsCutSystem.snap);
 		}
 
 		ImGui::End();
@@ -203,7 +203,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 				ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, modelMatrix);
 				//ImGui::SliderFloat3("Sc", scale, 1.0, 1000.0f, "%.0f");
-				ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, ImGuizmo::WORLD, modelMatrix, NULL, (g_DirectorsCutSystem.useSnap ? &g_DirectorsCutSystem.snap : NULL), NULL, NULL);
+				ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, ImGuizmo::WORLD, modelMatrix, NULL, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
 				ImGuizmo::DecomposeMatrixToComponents(modelMatrix, translation, rotation, scale);
 				// Revert Y up
 				float translation2[3];
@@ -315,6 +315,11 @@ void CDirectorsCutSystem::PostInit()
 	for (int i = 0; i < 16; i++)
 	{
 		identityMatrix[i] = newIdentityMatrix[i];
+	}
+	float newSnap[3] = { 1.f, 1.f, 1.f };
+	for (int i = 0; i < 3; i++)
+	{
+		snap[i] = newSnap[i];
 	}
 	// Hook Direct3D in hl2.exe
 	Msg("Director's Cut: Hooking Direct3D...\n");

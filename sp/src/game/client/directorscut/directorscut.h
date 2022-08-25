@@ -39,11 +39,11 @@ public:
 	float cameraView[16];
 	float cameraProjection[16];
 	float identityMatrix[16];
+	float snap[3];
 	float distance = 8.f;
 	float fov = 93; // dunno why this works
 	float fovAdjustment = 2;
 	float playerFov;
-	float snap = 1;
 	float camYAngle = 165.f / 180.f * M_PI_F;
 	float camXAngle = 32.f / 180.f * M_PI_F;
 	Vector pivot;
