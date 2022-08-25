@@ -31,7 +31,6 @@ public:
 	virtual void LevelInitPostEntity();
 	virtual void LevelShutdownPostEntity();
 	virtual void Update(float frametime);
-	void CreateTestDag();
 	void SetupEngineView(Vector &origin, QAngle &angles, float &fov);
 	void Frustum(float left, float right, float bottom, float top, float znear, float zfar, float* m16);
 	void Perspective(float fov, float aspect, float znear, float zfar, float* m16);

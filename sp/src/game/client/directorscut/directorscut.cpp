@@ -23,6 +23,9 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+void CreateTestDag(const CCommand& args);
+
 CDirectorsCutSystem g_DirectorsCutSystem;
 
 CDirectorsCutSystem &DirectorsCutGameSystem()
@@ -38,14 +41,13 @@ ConCommand cmd_imgui_toggle("dx_imgui_toggle", [](const CCommand& args) {
 ConCommand cmd_imgui_input_toggle("dx_imgui_input_toggle", [](const CCommand& args) {
 	cvar_imgui_input_enabled.SetValue(!cvar_imgui_input_enabled.GetBool());
 }, "Toggle ImGui input", FCVAR_ARCHIVE);
-ConCommand cmd_test_entity("dx_test_entity", [](const CCommand& args) {
-	g_DirectorsCutSystem.CreateTestDag();
-}, "Create a test entity", FCVAR_ARCHIVE);
+ConCommand cmd_test_entity("dx_test_entity", &CreateTestDag, "Create a test entity", FCVAR_ARCHIVE);
 
 WNDPROC ogWndProc = nullptr;
 
 static ImGuizmo::OPERATION mCurrentGizmoOperation(ImGuizmo::TRANSLATE);
 
+// Render Dear ImGui
 void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 {
 	bool firstFrame = false;
@@ -58,20 +60,19 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 	}
 	if (cvar_imgui_enabled.GetBool() && g_DirectorsCutSystem.imguiActive)
 	{
-		ImGui_ImplDX9_NewFrame();
-		ImGui_ImplWin32_NewFrame();
-
-		ImGui::NewFrame();
-		ImGuizmo::BeginFrame();
-
-		// Drawing
-		//ImGui::ShowDemoWindow();
-
 		ImGuiIO& io = ImGui::GetIO();
 
 		int windowWidth;
 		int windowHeight;
 		vgui::surface()->GetScreenSize(windowWidth, windowHeight);
+
+		// Drawing
+		
+		ImGui_ImplDX9_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+
+		ImGui::NewFrame();
+		ImGuizmo::BeginFrame();
 
 		if (g_DirectorsCutSystem.orthographic)
 		{
@@ -92,8 +93,18 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 		ImGui::Begin("Camera", 0, ImGuiWindowFlags_AlwaysAutoResize);
 
+
 		ImGui::LabelText("Origin", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineOrigin.x, g_DirectorsCutSystem.engineOrigin.y, g_DirectorsCutSystem.engineOrigin.z);
 		ImGui::LabelText("Angles", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineAngles.x, g_DirectorsCutSystem.engineAngles.y, g_DirectorsCutSystem.engineAngles.z);
+
+		float pivot[3];
+		pivot[0] = g_DirectorsCutSystem.pivot.x;
+		pivot[1] = g_DirectorsCutSystem.pivot.y;
+		pivot[2] = g_DirectorsCutSystem.pivot.z;
+		ImGui::InputFloat3("Pivot", pivot);
+		g_DirectorsCutSystem.pivot.x = pivot[0];
+		g_DirectorsCutSystem.pivot.y = pivot[1];
+		g_DirectorsCutSystem.pivot.z = pivot[2];
 		
 		if (ImGui::Button("Player Camera to Pivot"))
 		{
@@ -111,13 +122,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		
 		bool viewDirty = false;
 
-		float setPivot[3];
-		setPivot[0] = g_DirectorsCutSystem.pivot.x;
-		setPivot[1] = g_DirectorsCutSystem.pivot.y;
-		setPivot[2] = g_DirectorsCutSystem.pivot.z;
-		ImGui::Text("Pivot", setPivot);
-
-		ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
+		ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.3f");
 		viewDirty |= ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 1, 1000.0f, "%.0f");
 
 		if (viewDirty || firstFrame)
@@ -135,7 +140,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 		if (g_DirectorsCutSystem.useSnap)
 		{
-			ImGui::SliderFloat("Snap", &g_DirectorsCutSystem.snap, 1, 10.0f, "%.0f");
+			ImGui::InputFloat3("Snap", &g_DirectorsCutSystem.snap);
 		}
 
 		ImGui::End();
@@ -144,21 +149,11 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 		if (g_DirectorsCutSystem.dags.Count() > 0)
 		{
-			/*
-			for (int i = 0; i < g_DirectorsCutSystem.dags.Count(); i++)
-			{
-				C_BaseAnimating* dag = g_DirectorsCutSystem.dags[i];
-				if (dag)
-				{
-					if (ImGui::Button(dag->GetModelName()))
-					{
-						g_DirectorsCutSystem.elementIndex = i;
-					}
-				}
-			}
-			*/
 			ImGui::Text("Dags: %d", g_DirectorsCutSystem.dags.Count());
-			ImGui::Text("Selected: %d", g_DirectorsCutSystem.elementIndex+1);
+			if (g_DirectorsCutSystem.dags.Count() > 0)
+			{
+				ImGui::SliderInt("Dag Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.dags.Count() - 1);
+			}
 		}
 		else
 		{
@@ -210,14 +205,22 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 				//ImGui::SliderFloat3("Sc", scale, 1.0, 1000.0f, "%.0f");
 				ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, ImGuizmo::WORLD, modelMatrix, NULL, (g_DirectorsCutSystem.useSnap ? &g_DirectorsCutSystem.snap : NULL), NULL, NULL);
 				ImGuizmo::DecomposeMatrixToComponents(modelMatrix, translation, rotation, scale);
-				bool useTr = ImGui::SliderFloat3("Tr", translation, -1000.0f, 1000.0f, "%.0f");
-				bool useRt = ImGui::SliderFloat3("Rt", rotation, -180.0f, 180.0f, "%.0f");
+				// Revert Y up
+				float translation2[3];
+				translation2[0] = -translation[2];
+				translation2[1] = -translation[0];
+				translation2[2] = translation[1];
+				// Remove offset (pivot) from translation
+				translation2[0] += g_DirectorsCutSystem.pivot.x;
+				translation2[1] += g_DirectorsCutSystem.pivot.y;
+				translation2[2] += g_DirectorsCutSystem.pivot.z;
+				// Show inputs
+				bool useTr = ImGui::InputFloat3("Origin", translation2);
+				bool useRt = ImGui::SliderFloat3("Angles", rotation, -180.0f, 180.0f);
 				if (ImGuizmo::IsUsing() || useTr || useRt)
 				{
-					// Revert Y up
-					Vector newPos = Vector(-translation[2], -translation[0], translation[1]);
-					// Remove offset (pivot) from translation
-					newPos += g_DirectorsCutSystem.pivot;
+					// Create source vars from new values
+					Vector newPos(translation2[0], translation2[1], translation2[2]);
 					QAngle newAng = QAngle(rotation[0], rotation[1], rotation[2]);
 					element->SetAbsOrigin(newPos);
 					element->SetAbsAngles(newAng);
@@ -432,35 +435,46 @@ void CDirectorsCutSystem::Update(float frametime)
 	}
 }
 
-void CDirectorsCutSystem::CreateTestDag()
+void CreateTestDag(const CCommand& args)
 {
+	// Set model name
+	const char* modelName = "models/props_junk/watermelon01.mdl";
+	if (args.ArgC() > 1)
+	{
+		modelName = args.Arg(1);
+		// Prepend "models/" if not present
+		if (strncmp(modelName, "models/", 7) != 0)
+		{
+			char newModelName[256];
+			sprintf(newModelName, "models/%s", modelName);
+			modelName = newModelName;
+		}
+		// Append ".mdl" if not present
+		if (strstr(modelName, ".mdl") == NULL)
+		{
+			char newModelName[256];
+			sprintf(newModelName, "%s.mdl", modelName);
+			modelName = newModelName;
+		}
+	}
+	
 	// Cache model
-	char* modelName = "models/props_junk/watermelon01.mdl";
-	MDLHandle_t modelCache = g_pMDLCache->FindMDL(modelName);
-	if (modelCache == MDLHANDLE_INVALID)
+	model_t* model = (model_t*)engine->LoadModel(modelName);
+	if (!model)
 	{
-		Msg("Director's Cut: Failed to precache model %s\n", modelName);
+		Msg("Director's Cut: Failed to load model %s\n", modelName);
 		return;
 	}
-	g_pMDLCache->AddRef(modelCache);
-	int cached = g_pMDLCache->GetRef(modelCache);
-	if (cached < 0)
-	{
-		Msg("Director's Cut: Failed to precache model index %s (%d)\n", modelName, cached);
-		g_pMDLCache->Release(modelCache);
-		return;
-	}
+	
 	// Create test dag
 	C_DagEntity* pEntity = new C_DagEntity();
 	if (!pEntity)
 		return;
-	pEntity->SetAbsOrigin(Vector(0, 0, 0));
-	pEntity->SetModelIndex(cached);
 
 	RenderGroup_t renderGroup = RENDER_GROUP_OPAQUE_ENTITY;
 	
 	// Spawn entity
-	if (!pEntity->InitializeAsClientEntityByIndex(cached, renderGroup))
+	if (!pEntity->InitializeAsClientEntityByHandle(model, renderGroup))
 	{
 		Msg("Director's Cut: Failed to spawn entity %s\n", modelName);
 		pEntity->Release();
@@ -468,9 +482,9 @@ void CDirectorsCutSystem::CreateTestDag()
 	}
 
 	// Add entity to list
-	clienttools->AddClientRenderable(pEntity, renderGroup);
-	dags.AddToTail(pEntity);
-	elementIndex = dags.Count() - 1;
+	//clienttools->AddClientRenderable(pEntity, renderGroup);
+	g_DirectorsCutSystem.dags.AddToTail(pEntity);
+	g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.dags.Count() - 1;
 	Msg("Director's Cut: Created dag with model name %s and render group %d\n", modelName, renderGroup);
 }
 

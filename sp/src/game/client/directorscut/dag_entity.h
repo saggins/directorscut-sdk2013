@@ -12,6 +12,8 @@
 
 class C_DagEntity : public C_BaseAnimating
 {
+public:
+	bool InitializeAsClientEntityByHandle(model_t* pModel, RenderGroup_t renderGroup);
 };
 
 #endif
