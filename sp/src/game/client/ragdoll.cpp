@@ -214,7 +214,8 @@ void CRagdoll::VPhysicsUpdate( IPhysicsObject *pPhysics )
 	}
 
 	// See if we should go to sleep...
-	CheckSettleStationaryRagdoll();
+	// DIRECTORSCUTCHANGE: We're not going to sleep
+	//CheckSettleStationaryRagdoll();
 }
 
 //=============================================================================

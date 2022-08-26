@@ -51,8 +51,11 @@ public:
 	Vector playerOrigin;
 	QAngle engineAngles;
 	QAngle playerAngles;
-	CUtlVector< C_DagEntity* > dags;
+	CUtlVector< C_BaseAnimating* > dags;
 	int elementIndex = -1;
+	int ragdollIndex = -1;
+	int boneIndex = -1;
+	int operation = 0;
 	bool useSnap = false;
 	bool orthographic = false;
 	bool firstEndScene = true;
