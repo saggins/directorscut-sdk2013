@@ -35,6 +35,11 @@ CDirectorsCutSystem &DirectorsCutGameSystem()
 char* defaultDagModelName = "models/editor/axis_helper.mdl";
 C_BaseAnimating* CreateDag(char* modelName, bool add, bool setIndex);
 
+char* defaultLightTextureName = "effects/flashlight001";
+CLightCustomEffect* CreateLight(char* modelName, bool add, bool setIndex);
+
+C_PointCamera* CreateCamera(bool add, bool setIndex);
+
 char* defaultRagdollName = "models/alyx.mdl";
 C_BaseAnimating* CreateRagdoll(char* modelName, bool add, bool setIndex);
 
@@ -61,7 +66,7 @@ ConCommand cmd_create_ragdoll("dx_create_ragdoll", [](const CCommand& args) {
 	if (args.ArgC() > 1)
 		modelName = (char*)args.Arg(1);
 	CreateRagdoll(modelName, true, true);
-}, "Create ragdoll (UNSUPPORTED)", FCVAR_ARCHIVE);
+}, "Create ragdoll", FCVAR_ARCHIVE);
 ConCommand cmd_zoom_in("dx_zoom_in", [](const CCommand& args) {
 	if (cvar_imgui_input_enabled.GetBool())
 	{
@@ -83,7 +88,8 @@ ConCommand cmd_zoom_out("dx_zoom_out", [](const CCommand& args) {
 
 WNDPROC ogWndProc = nullptr;
 
-static ImGuizmo::OPERATION mCurrentGizmoOperation(ImGuizmo::TRANSLATE);
+static ImGuizmo::OPERATION mCurrentGizmoOperation(ImGuizmo::TRANSLATE | ImGuizmo::ROTATE);
+static ImGuizmo::MODE mCurrentGizmoMode(ImGuizmo::WORLD);
 
 // Render Dear ImGui
 void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
@@ -111,26 +117,14 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 		ImGui::NewFrame();
 		ImGuizmo::BeginFrame();
-
-		if (g_DirectorsCutSystem.orthographic)
-		{
-			float orthoWidth, orthoHeight;
-			::input->CAM_OrthographicSize(orthoWidth, orthoHeight);
-			orthoHeight = orthoWidth * windowHeight / windowWidth;
-			g_DirectorsCutSystem.OrthoGraphic(-orthoWidth, orthoHeight, -orthoWidth, orthoHeight, 1000.f, -1000.f, g_DirectorsCutSystem.cameraProjection);
-		}
-		else
-		{
-			const CViewSetup* viewSetup = view->GetViewSetup();
-			//ImGui::SliderFloat("Fov Adjustment", &g_DirectorsCutSystem.fovAdjustment, 1.f, 100.f);
-			float fov = viewSetup->fov * g_DirectorsCutSystem.fovAdjustment;
-			g_DirectorsCutSystem.Perspective(fov, io.DisplaySize.x / io.DisplaySize.y, viewSetup->zNear, viewSetup->zFar, g_DirectorsCutSystem.cameraProjection);
-		}
 		
+		const CViewSetup* viewSetup = view->GetViewSetup();
+		float fov = viewSetup->fov * g_DirectorsCutSystem.fovAdjustment;
+		g_DirectorsCutSystem.Perspective(fov, io.DisplaySize.x / io.DisplaySize.y, viewSetup->zNear, viewSetup->zFar, g_DirectorsCutSystem.cameraProjection);
+
 		ImGuizmo::SetOrthographic(g_DirectorsCutSystem.orthographic);
 
 		ImGui::Begin("Camera", 0, ImGuiWindowFlags_AlwaysAutoResize);
-
 
 		ImGui::LabelText("Origin", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineOrigin.x, g_DirectorsCutSystem.engineOrigin.y, g_DirectorsCutSystem.engineOrigin.z);
 		ImGui::LabelText("Angles", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineAngles.x, g_DirectorsCutSystem.engineAngles.y, g_DirectorsCutSystem.engineAngles.z);
@@ -145,44 +139,109 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		g_DirectorsCutSystem.pivot.z = pivot[2];
 		
 		if (ImGui::Button("Player Camera to Pivot"))
-		{
 			g_DirectorsCutSystem.pivot = g_DirectorsCutSystem.playerOrigin;
+
+
+		if (g_DirectorsCutSystem.nextElementMode != g_DirectorsCutSystem.elementMode)
+		{
+			g_DirectorsCutSystem.elementMode = g_DirectorsCutSystem.nextElementMode;
+			switch (g_DirectorsCutSystem.elementMode)
+			{
+			case 0:
+				g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.dags.Count() - 1;
+			case 1:
+				g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.lights.Count() - 1;
+				break;
+			case 2:
+				g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.cameras.Count() - 1;
+				break;
+			}
 		}
 
 		if (g_DirectorsCutSystem.elementIndex > -1)
 		{
-			C_BaseAnimating* elementE = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
-			if (elementE)
+			C_BaseAnimating* elementE;
+			CLightCustomEffect* elementL;
+			C_PointCamera* elementC;
+			switch (g_DirectorsCutSystem.elementMode)
 			{
-				if (ImGui::Button("Selected Dag to Pivot"))
+			case 0:
+				if (g_DirectorsCutSystem.elementIndex > g_DirectorsCutSystem.dags.Count() - 1)
+					g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.dags.Count() - 1;
+				if (g_DirectorsCutSystem.dags.Count() > 0)
+					elementE = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
+				else
+					elementE = nullptr;
+				if (elementE != nullptr)
 				{
-					g_DirectorsCutSystem.pivot = elementE->GetAbsOrigin();
-				}
-
-				if (elementE->IsRagdoll())
-				{
-					if (g_DirectorsCutSystem.boneIndex > -1)
+					if (ImGui::Button("Selected Model to Pivot") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
 					{
-						if (ImGui::Button("Selected Bone to Pivot"))
+						g_DirectorsCutSystem.pivot = elementE->GetAbsOrigin();
+					}
+
+					if (elementE->IsRagdoll())
+					{
+						if (g_DirectorsCutSystem.boneIndex > -1)
 						{
-							QAngle dummy;
-							elementE->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&g_DirectorsCutSystem.pivot, &dummy);
+							if (ImGui::Button("Selected Bone to Pivot") || ImGui::IsKeyPressed(ImGuiKey_Z, false))
+							{
+								QAngle dummy;
+								elementE->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&g_DirectorsCutSystem.pivot, &dummy);
+							}
 						}
 					}
 				}
+				break;
+			case 1:
+				if (g_DirectorsCutSystem.elementIndex > g_DirectorsCutSystem.lights.Count() - 1)
+					g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.lights.Count() - 1;
+				if (g_DirectorsCutSystem.lights.Count() > 0)
+					elementL = g_DirectorsCutSystem.lights[g_DirectorsCutSystem.elementIndex];
+				else
+					elementL = nullptr;
+				if (elementL != nullptr)
+				{
+					if (ImGui::Button("Selected Light to Pivot") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+					{
+						g_DirectorsCutSystem.pivot = elementL->GetAbsOrigin();
+					}
+				}
+				break;
+			case 2:
+				if (g_DirectorsCutSystem.elementIndex > g_DirectorsCutSystem.cameras.Count() - 1)
+					g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.cameras.Count() - 1;
+				if (g_DirectorsCutSystem.cameras.Count() > 0)
+					elementC = g_DirectorsCutSystem.cameras[g_DirectorsCutSystem.elementIndex];
+				else
+					elementC = nullptr;
+				if (elementC != nullptr)
+				{
+					if (ImGui::Button("Selected Light to Pivot") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+					{
+						g_DirectorsCutSystem.pivot = elementC->GetAbsOrigin();
+					}
+				}
+				break;
 			}
 		}
 		
 		bool viewDirty = false;
 
-		viewDirty |= ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.3f");
+		// TODO: camera dags should unlock field of view slider
+		//viewDirty |= ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
+		ImGui::LabelText("Field of View", "%.0f", g_DirectorsCutSystem.fov);
 
 		float oldDistance = g_DirectorsCutSystem.distance;
 		float mouseDistance = -ImGui::GetIO().MouseWheel * cvar_dx_zoom_distance.GetFloat();
-		if (g_DirectorsCutSystem.distance + mouseDistance >= 1.f)
-			g_DirectorsCutSystem.distance += mouseDistance;
-		else
+		float newDistance = g_DirectorsCutSystem.distance + mouseDistance;
+		
+		if (newDistance >= 1.f && newDistance <= 1000.f)
+			g_DirectorsCutSystem.distance = newDistance;
+		else if (newDistance < 1.f)
 			g_DirectorsCutSystem.distance = 1.f;
+		else if (newDistance > 1000.f)
+			g_DirectorsCutSystem.distance = 1000.f;
+		
 		if (oldDistance != g_DirectorsCutSystem.distance)
 			viewDirty = true;
 		
@@ -199,7 +258,10 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		}
 
 		ImGui::Checkbox("Draw Grid", &g_DirectorsCutSystem.drawGrid);
-		ImGui::Checkbox("Orthographic", &g_DirectorsCutSystem.orthographic);
+		if (g_DirectorsCutSystem.drawGrid)
+		{
+			ImGui::InputFloat("Grid Size", &g_DirectorsCutSystem.gridSize);
+		}
 		ImGui::SliderInt("Set Operation", &g_DirectorsCutSystem.operation, 0, 2);
 		switch (g_DirectorsCutSystem.operation)
 		{
@@ -215,250 +277,509 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 				ImGui::LabelText("Operation", "Universal");
 				mCurrentGizmoOperation = ImGuizmo::TRANSLATE | ImGuizmo::ROTATE;
 		}
+		if (ImGui::IsKeyPressed(ImGuiKey_T, false))
+			g_DirectorsCutSystem.operation = 0;
+		if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+			g_DirectorsCutSystem.operation = 1;
+		if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
+			g_DirectorsCutSystem.operation = 2;
 		ImGui::Checkbox("Use Snapping", &g_DirectorsCutSystem.useSnap);
 		if (g_DirectorsCutSystem.useSnap)
-		{
 			ImGui::InputFloat3("Snap", g_DirectorsCutSystem.snap);
+		
+		ImGui::SliderFloat("Time Scale", &g_DirectorsCutSystem.timeScale, 0.01f, 1.f, "%.2f");
+
+		if (ImGui::RadioButton("Local", mCurrentGizmoMode == ImGuizmo::LOCAL))
+			mCurrentGizmoMode = ImGuizmo::LOCAL;
+		ImGui::SameLine();
+		if (ImGui::RadioButton("World", mCurrentGizmoMode == ImGuizmo::WORLD))
+			mCurrentGizmoMode = ImGuizmo::WORLD;
+		if (ImGui::IsKeyPressed(ImGuiKey_L, false))
+		{
+			if (mCurrentGizmoMode == ImGuizmo::LOCAL)
+				mCurrentGizmoMode = ImGuizmo::WORLD;
+			else
+				mCurrentGizmoMode = ImGuizmo::LOCAL;
 		}
 
 		ImGui::End();
 
 		ImGui::Begin("Dags", 0, ImGuiWindowFlags_AlwaysAutoResize);
 
-		if (ImGui::Button("Spawn Dag"))
-			CreateDag(defaultDagModelName, true, true);
-		ImGui::SameLine();
-		if (ImGui::Button("Spawn Dag at Pivot"))
+		if (!g_DirectorsCutSystem.levelInit)
 		{
-			C_BaseAnimating* pEntity = CreateDag(defaultDagModelName, true, true);
-			if (pEntity)
-			{
-				pEntity->SetAbsOrigin(g_DirectorsCutSystem.pivot);
-			}
-		}
-
-		/*
-		if (ImGui::Button("Spawn Ragdoll"))
-			CreateRagdoll(defaultRagdollName, true, true);
-		ImGui::SameLine();
-		if (ImGui::Button("Spawn Ragdoll at Pivot"))
-		{
-			C_BaseAnimating* pEntity = CreateDag(defaultRagdollName, false, false);
-			if (pEntity)
-			{
-				pEntity->SetAbsOrigin(g_DirectorsCutSystem.pivot);
-				MakeRagdoll(pEntity, true, true);
-			}
-		}
-		*/
-
-		if (g_DirectorsCutSystem.dags.Count() > 0)
-		{
-			ImGui::LabelText("Dags", "%d", g_DirectorsCutSystem.dags.Count());
-			if (g_DirectorsCutSystem.dags.Count() > 1)
-			{
-				if (ImGui::SliderInt("Dag Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.dags.Count() - 1))
-				{
-					C_BaseAnimating* pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
-					if (pEntity && pEntity->IsRagdoll() && g_DirectorsCutSystem.ragdollIndex != g_DirectorsCutSystem.elementIndex)
-					{
-						g_DirectorsCutSystem.ragdollIndex = g_DirectorsCutSystem.elementIndex;
-						g_DirectorsCutSystem.boneIndex = 0;
-					}
-					else
-					{
-						g_DirectorsCutSystem.boneIndex = -1;
-					}
-				}
-			}
-			else
-			{
-				ImGui::LabelText("Dag Index", "%d", g_DirectorsCutSystem.elementIndex);
-			}
-			C_BaseAnimating* pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
-			if (pEntity)
-			{
-				ImGui::LabelText("Dag Model", "%s", pEntity->GetModelPtr()->pszName());
-				if (pEntity->IsRagdoll())
-				{
-					CStudioHdr* modelPtr = pEntity->GetModelPtr();
-					if (modelPtr)
-					{
-						char* boneModel = "";
-						for (int i = 0; i < modelPtr->numbones(); i++)
-						{
-							mstudiobone_t* bone = modelPtr->pBone(i);
-							if (bone)
-							{
-								if (bone->physicsbone == g_DirectorsCutSystem.boneIndex)
-								{
-									boneModel = bone->pszName();
-									break;
-								}
-							}
-						}
-						ImGui::LabelText("Bone Model", "%s", boneModel);
-					}
-					ImGui::SliderInt("Bone Index", &g_DirectorsCutSystem.boneIndex, 0, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
-					CRagdoll* ragdoll = pEntity->m_pRagdoll;
-					if (ragdoll)
-					{
-						IPhysicsObject* bone = ragdoll->GetElement(g_DirectorsCutSystem.boneIndex);
-						if (bone)
-						{
-							//ImGui::LabelText("Bone Name", "%s", ragdoll->name);
-							if (!bone->IsMotionEnabled())
-							{
-								if (ImGui::Button("Unfreeze Bone"))
-								{
-									PhysForceClearVelocity(bone);
-									bone->EnableMotion(true);
-									bone->Wake();
-									PhysForceClearVelocity(bone);
-								}
-							}
-							else
-							{
-								if (ImGui::Button("Freeze Bone"))
-								{
-									PhysForceClearVelocity(bone);
-									bone->Sleep();
-									bone->EnableMotion(false);
-									PhysForceClearVelocity(bone);
-								}
-							}
-						}
-						ImGui::SameLine();
-						if (ImGui::Button("Freeze All"))
-						{
-							for (int i = 0; i < ragdoll->RagdollBoneCount() - 1; i++)
-							{
-								IPhysicsObject* bone = ragdoll->GetElement(i);
-								if (bone)
-								{
-									PhysForceClearVelocity(bone);
-									bone->Sleep();
-									bone->EnableMotion(false);
-									PhysForceClearVelocity(bone);
-								}
-							}
-						}
-						ImGui::SameLine();
-						if (ImGui::Button("Unfreeze All"))
-						{
-							for (int i = 0; i < ragdoll->RagdollBoneCount() - 1; i++)
-							{
-								IPhysicsObject* bone = ragdoll->GetElement(i);
-								if (bone)
-								{
-									PhysForceClearVelocity(bone);
-									bone->EnableMotion(true);
-									bone->Wake();
-									PhysForceClearVelocity(bone);
-								}
-							}
-						}
-					}
-				}
-			}
-			if (ImGui::Button("Remove Dag"))
-			{
-				g_DirectorsCutSystem.dags.Remove(g_DirectorsCutSystem.elementIndex);
-				g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.dags.Count() - 1;
-				g_DirectorsCutSystem.boneIndex = -1;
-				pEntity->Remove();
-			}
-			if (g_DirectorsCutSystem.elementIndex > -1)
-			{
-				// Retry for pEntity pointer in case we just removed it
-				pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
-				if (pEntity)
-				{
-					ImGuizmo::SetID(g_DirectorsCutSystem.elementIndex);
-
-					float modelMatrix[16];
-					Vector pos = pEntity->GetAbsOrigin();
-					QAngle ang = pEntity->GetAbsAngles();
-					float s = pEntity->GetModelScale();
-					if (pEntity->IsRagdoll())
-						pEntity->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&pos, &ang);
-
-					static float translation[3], rotation[3], scale[3];
-
-					// Add offset (pivot) to translation
-					pos -= g_DirectorsCutSystem.pivot;
-
-					// Y up to Z up - pos is Z up, translation is Y up
-					translation[0] = -pos.y;
-					translation[1] = pos.z;
-					translation[2] = -pos.x;
-
-					rotation[0] = -ang.x;
-					rotation[1] = ang.y;
-					rotation[2] = -ang.z;
-
-					// TODO: proper?
-					scale[0] = s;
-					scale[1] = s;
-					scale[2] = s;
-
-					ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, modelMatrix);
-					//ImGui::SliderFloat3("Sc", scale, 1.0, 1000.0f, "%.0f");
-					ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, ImGuizmo::WORLD, modelMatrix, NULL, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
-					ImGuizmo::DecomposeMatrixToComponents(modelMatrix, translation, rotation, scale);
-					// Revert Z up
-					float translation2[3];
-					translation2[0] = -translation[2];
-					translation2[1] = -translation[0];
-					translation2[2] = translation[1];
-					float rotation2[3];
-					rotation2[0] = -rotation[0];
-					rotation2[1] = rotation[1];
-					rotation2[2] = -rotation[2];
-					// Remove offset (pivot) from translation
-					translation2[0] += g_DirectorsCutSystem.pivot.x;
-					translation2[1] += g_DirectorsCutSystem.pivot.y;
-					translation2[2] += g_DirectorsCutSystem.pivot.z;
-					// Show inputs
-					bool useTr = ImGui::InputFloat3("Origin", translation2);
-					bool useRt = ImGui::InputFloat3("Angles", rotation2);
-					if (ImGuizmo::IsUsing() || useTr || useRt)
-					{
-						// Create source vars from new values
-						Vector newPos(translation2[0], translation2[1], translation2[2]);
-						QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
-						if (pEntity->IsRagdoll())
-						{
-							IPhysicsObject* bone = pEntity->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex);
-							bone->Wake();
-							bone->SetPosition(newPos, newAng, true);
-							PhysForceClearVelocity(bone);
-						}
-						else
-						{
-							pEntity->SetAbsOrigin(newPos);
-							pEntity->SetAbsAngles(newAng);
-						}
-					}
-				}
-			}
+			ImGui::Text("Level not loaded");
 		}
 		else
 		{
-			ImGui::Text("No dags found");
+			ImGui::SliderInt("Set Element Mode", &g_DirectorsCutSystem.nextElementMode, 0, 2);
+			switch (g_DirectorsCutSystem.elementMode)
+			{
+			case 0:
+				ImGui::LabelText("Element Mode", "Models");
+
+				ImGui::InputText("Model Name", &g_DirectorsCutSystem.modelName);
+				
+				if (ImGui::Button("Spawn Model"))
+					CreateDag((char*)g_DirectorsCutSystem.modelName.c_str(), true, true);
+				ImGui::SameLine();
+				if (ImGui::Button("Spawn Model at Pivot"))
+				{
+					C_BaseAnimating* pEntity = CreateDag((char*)g_DirectorsCutSystem.modelName.c_str(), true, true);
+					if (pEntity != nullptr)
+					{
+						pEntity->SetAbsOrigin(g_DirectorsCutSystem.pivot);
+					}
+				}
+
+				if (g_DirectorsCutSystem.dags.Count() > 0)
+				{
+					// failsafe
+					if (g_DirectorsCutSystem.elementIndex < 0)
+						g_DirectorsCutSystem.elementIndex = 0;
+					ImGui::LabelText("Models", "%d", g_DirectorsCutSystem.dags.Count());
+					if (g_DirectorsCutSystem.dags.Count() > 1)
+					{
+						if (ImGui::SliderInt("Model Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.dags.Count() - 1))
+						{
+							C_BaseAnimating* pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
+							if (pEntity != nullptr && pEntity->IsRagdoll() && g_DirectorsCutSystem.ragdollIndex != g_DirectorsCutSystem.elementIndex)
+							{
+								g_DirectorsCutSystem.ragdollIndex = g_DirectorsCutSystem.elementIndex;
+								g_DirectorsCutSystem.boneIndex = 0;
+							}
+							else
+							{
+								g_DirectorsCutSystem.boneIndex = -1;
+							}
+						}
+					}
+					else
+					{
+						ImGui::LabelText("Model Index", "%d", g_DirectorsCutSystem.elementIndex);
+					}
+					C_BaseAnimating* pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
+					if (pEntity != nullptr)
+					{
+						ImGui::LabelText("Selected Model Name", "%s", pEntity->GetModelPtr()->pszName());
+						if (pEntity->IsRagdoll())
+						{
+							CStudioHdr* modelPtr = pEntity->GetModelPtr();
+							if (modelPtr)
+							{
+								char* boneModel = "";
+								for (int i = 0; i < modelPtr->numbones(); i++)
+								{
+									mstudiobone_t* bone = modelPtr->pBone(i);
+									if (bone != nullptr)
+									{
+										if (bone->physicsbone == g_DirectorsCutSystem.boneIndex)
+										{
+											boneModel = bone->pszName();
+											break;
+										}
+									}
+								}
+								ImGui::LabelText("Bone Name", "%s", boneModel);
+							}
+							ImGui::SliderInt("Bone Index", &g_DirectorsCutSystem.boneIndex, 0, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
+							CRagdoll* ragdoll = pEntity->m_pRagdoll;
+							if (ragdoll != nullptr)
+							{
+								IPhysicsObject* bone = ragdoll->GetElement(g_DirectorsCutSystem.boneIndex);
+								if (bone != nullptr)
+								{
+									//ImGui::LabelText("Bone Name", "%s", ragdoll->name);
+									if (!bone->IsMotionEnabled())
+									{
+										if (ImGui::Button("Unfreeze Bone") || ImGui::IsKeyPressed(ImGuiKey_F, false))
+										{
+											PhysForceClearVelocity(bone);
+											bone->EnableMotion(true);
+											bone->Wake();
+											PhysForceClearVelocity(bone);
+										}
+									}
+									else
+									{
+										// f key also freezes
+										if (ImGui::Button("Freeze Bone") || ImGui::IsKeyPressed(ImGuiKey_F, false))
+										{
+											PhysForceClearVelocity(bone);
+											bone->Sleep();
+											bone->EnableMotion(false);
+											PhysForceClearVelocity(bone);
+										}
+									}
+								}
+								ImGui::SameLine();
+								if (ImGui::Button("Freeze All"))
+								{
+									for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
+									{
+										IPhysicsObject* bone = ragdoll->GetElement(i);
+										if (bone != nullptr)
+										{
+											PhysForceClearVelocity(bone);
+											bone->Sleep();
+											bone->EnableMotion(false);
+											PhysForceClearVelocity(bone);
+										}
+									}
+								}
+								ImGui::SameLine();
+								if (ImGui::Button("Unfreeze All"))
+								{
+									for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
+									{
+										IPhysicsObject* bone = ragdoll->GetElement(i);
+										if (bone != nullptr)
+										{
+											PhysForceClearVelocity(bone);
+											bone->EnableMotion(true);
+											bone->Wake();
+											PhysForceClearVelocity(bone);
+										}
+									}
+								}
+							}
+						}
+						else if(modelinfo->GetVCollide(pEntity->GetModelIndex()) != nullptr)
+						{
+							if (ImGui::Button("Make Ragdoll"))
+							{
+								g_DirectorsCutSystem.dags.Remove(g_DirectorsCutSystem.elementIndex);
+								g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.dags.Count() - 1;
+								g_DirectorsCutSystem.boneIndex = -1;
+								MakeRagdoll(pEntity, true, true);
+							}
+							ImGui::SameLine();
+						}
+					}
+					if (ImGui::Button("Remove Model"))
+					{
+						g_DirectorsCutSystem.dags.Remove(g_DirectorsCutSystem.elementIndex);
+						g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.dags.Count() - 1;
+						g_DirectorsCutSystem.boneIndex = -1;
+						pEntity->Remove();
+					}
+					if (g_DirectorsCutSystem.elementIndex > -1)
+					{
+						// Retry for pEntity pointer in case we just removed it
+						pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
+						if (pEntity != nullptr)
+						{
+							ImGuizmo::SetID(g_DirectorsCutSystem.elementIndex);
+
+							float modelMatrix[16];
+							Vector pos = pEntity->GetAbsOrigin();
+							QAngle ang = pEntity->GetAbsAngles();
+							float s = pEntity->GetModelScale();
+							if (pEntity->IsRagdoll())
+								pEntity->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&pos, &ang);
+
+							static float translation[3], rotation[3], scale[3];
+
+							// Add offset (pivot) to translation
+							pos -= g_DirectorsCutSystem.pivot;
+
+							// Y up to Z up - pos is Z up, translation is Y up
+							translation[0] = -pos.y;
+							translation[1] = pos.z;
+							translation[2] = -pos.x;
+
+							rotation[0] = -ang.x;
+							rotation[1] = ang.y;
+							rotation[2] = -ang.z;
+							
+							scale[0] = s;
+							scale[1] = s;
+							scale[2] = s;
+
+							ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, modelMatrix);
+							float deltaMatrix[16];
+							float deltaTranslation[3], deltaRotation[3], deltaScale[3];
+							ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode, modelMatrix, deltaMatrix, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
+							ImGuizmo::DecomposeMatrixToComponents(deltaMatrix, deltaTranslation, deltaRotation, deltaScale);
+							// Revert Z up
+							float translation2[3];
+							translation2[0] = -deltaTranslation[2];
+							translation2[1] = -deltaTranslation[0];
+							translation2[2] = deltaTranslation[1];
+							float rotation2[3];
+							rotation2[0] = -deltaRotation[0];
+							rotation2[1] = deltaRotation[1];
+							rotation2[2] = -deltaRotation[2];
+							if (ImGuizmo::IsUsing())
+							{
+								ImGui::LabelText("Delta Translation", "%f %f %f", deltaTranslation[0], deltaTranslation[1], deltaTranslation[2]);
+								ImGui::LabelText("Delta Rotation", "%f %f %f", deltaRotation[0], deltaRotation[1], deltaRotation[2]);
+								// Create source vars from new values
+								Vector newPos = Vector(0, 0, 0);
+								QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
+								if (newAng.x == 0.f && newAng.y == 0.f && newAng.z == 0.f && newAng.x == -0.f && newAng.y == -0.f && newAng.z == -0.f)
+									newPos = Vector(translation2[0], translation2[1], translation2[2]);
+								g_DirectorsCutSystem.deltaOrigin = newPos;
+								g_DirectorsCutSystem.deltaAngles = newAng;
+							}
+							else
+							{
+								g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
+								g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
+							}
+						}
+					}
+				}
+				else
+				{
+					ImGui::Text("No models found");
+				}
+				break;
+			case 1:
+				ImGui::LabelText("Element Mode", "Lights");
+				
+				//ImGui::InputText("Light Texture", &g_DirectorsCutSystem.lightTexture);
+
+				if (ImGui::Button("Spawn Light"))
+					CreateLight((char*)g_DirectorsCutSystem.lightTexture.c_str(), true, true);
+				ImGui::SameLine();
+				if (ImGui::Button("Spawn Light at Pivot"))
+				{
+					CLightCustomEffect* pEntity = CreateLight((char*)g_DirectorsCutSystem.lightTexture.c_str(), true, true);
+					if (pEntity != nullptr)
+					{
+						pEntity->SetAbsOrigin(g_DirectorsCutSystem.pivot);
+					}
+				}
+
+				if (g_DirectorsCutSystem.lights.Count() > 0)
+				{
+					// failsafe
+					if (g_DirectorsCutSystem.elementIndex < 0)
+						g_DirectorsCutSystem.elementIndex = 0;
+					ImGui::LabelText("Lights", "%d", g_DirectorsCutSystem.lights.Count());
+					if (g_DirectorsCutSystem.lights.Count() > 1)
+					{
+						ImGui::SliderInt("Light Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.lights.Count() - 1);
+					}
+					else
+					{
+						ImGui::LabelText("Light Index", "%d", g_DirectorsCutSystem.elementIndex);
+					}
+					CLightCustomEffect* pEntity = g_DirectorsCutSystem.lights[g_DirectorsCutSystem.elementIndex];
+					//if (pEntity != nullptr)
+						//ImGui::LabelText("Selected Light Texture", "%s", pEntity->GetSpotlightTextureName());
+					if (ImGui::Button("Remove Light"))
+					{
+						g_DirectorsCutSystem.lights.Remove(g_DirectorsCutSystem.elementIndex);
+						g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.lights.Count() - 1;
+						g_DirectorsCutSystem.boneIndex = -1;
+						pEntity->Remove();
+					}
+					if (g_DirectorsCutSystem.elementIndex > -1)
+					{
+						// Retry for pEntity pointer in case we just removed it
+						pEntity = g_DirectorsCutSystem.lights[g_DirectorsCutSystem.elementIndex];
+						if (pEntity != nullptr)
+						{
+							ImGuizmo::SetID(g_DirectorsCutSystem.elementIndex);
+
+							float modelMatrix[16];
+							Vector pos = pEntity->GetAbsOrigin();
+							QAngle ang = pEntity->GetAbsAngles();
+							float s = 1.f;
+
+							static float translation[3], rotation[3], scale[3];
+
+							// Add offset (pivot) to translation
+							pos -= g_DirectorsCutSystem.pivot;
+
+							// Y up to Z up - pos is Z up, translation is Y up
+							translation[0] = -pos.y;
+							translation[1] = pos.z;
+							translation[2] = -pos.x;
+
+							rotation[0] = -ang.x;
+							rotation[1] = ang.y;
+							rotation[2] = -ang.z;
+
+							scale[0] = s;
+							scale[1] = s;
+							scale[2] = s;
+
+							ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, modelMatrix);
+							float deltaMatrix[16];
+							float deltaTranslation[3], deltaRotation[3], deltaScale[3];
+							ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode, modelMatrix, deltaMatrix, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
+							ImGuizmo::DecomposeMatrixToComponents(deltaMatrix, deltaTranslation, deltaRotation, deltaScale);
+							// Revert Z up
+							float translation2[3];
+							translation2[0] = -deltaTranslation[2];
+							translation2[1] = -deltaTranslation[0];
+							translation2[2] = deltaTranslation[1];
+							float rotation2[3];
+							rotation2[0] = -deltaRotation[0];
+							rotation2[1] = deltaRotation[1];
+							rotation2[2] = -deltaRotation[2];
+							if (ImGuizmo::IsUsing())
+							{
+								ImGui::LabelText("Delta Translation", "%f %f %f", deltaTranslation[0], deltaTranslation[1], deltaTranslation[2]);
+								ImGui::LabelText("Delta Rotation", "%f %f %f", deltaRotation[0], deltaRotation[1], deltaRotation[2]);
+								// Create source vars from new values
+								Vector newPos = Vector(0, 0, 0);
+								QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
+								if (newAng.x == 0.f && newAng.y == 0.f && newAng.z == 0.f && newAng.x == -0.f && newAng.y == -0.f && newAng.z == -0.f)
+									newPos = Vector(translation2[0], translation2[1], translation2[2]);
+								g_DirectorsCutSystem.deltaOrigin = newPos;
+								g_DirectorsCutSystem.deltaAngles = newAng;
+							}
+							else
+							{
+								g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
+								g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
+							}
+						}
+					}
+				}
+				else
+				{
+					ImGui::Text("No lights found");
+				}
+
+				break;
+			case 2:
+				ImGui::LabelText("Element Mode", "Cameras");
+
+				if (ImGui::Button("Spawn Camera"))
+					CreateCamera(true, true);
+				ImGui::SameLine();
+				if (ImGui::Button("Spawn Camera at Pivot"))
+				{
+					C_PointCamera* pEntity = CreateCamera(true, true);
+					if (pEntity != nullptr)
+					{
+						pEntity->SetAbsOrigin(g_DirectorsCutSystem.pivot);
+					}
+				}
+
+				if (g_DirectorsCutSystem.cameras.Count() > 0)
+				{
+					// failsafe
+					if (g_DirectorsCutSystem.elementIndex < 0)
+						g_DirectorsCutSystem.elementIndex = 0;
+					ImGui::LabelText("Cameras", "%d", g_DirectorsCutSystem.cameras.Count());
+					if (g_DirectorsCutSystem.cameras.Count() > 1)
+					{
+						ImGui::SliderInt("Camera Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.cameras.Count() - 1);
+					}
+					else
+					{
+						ImGui::LabelText("Camera Index", "%d", g_DirectorsCutSystem.elementIndex);
+					}
+					C_PointCamera* pEntity = g_DirectorsCutSystem.cameras[g_DirectorsCutSystem.elementIndex];
+					if (ImGui::Button("Remove Camera"))
+					{
+						g_DirectorsCutSystem.cameras.Remove(g_DirectorsCutSystem.elementIndex);
+						g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.cameras.Count() - 1;
+						g_DirectorsCutSystem.boneIndex = -1;
+						pEntity->Remove();
+					}
+					if (g_DirectorsCutSystem.elementIndex > -1)
+					{
+						// Retry for pEntity pointer in case we just removed it
+						pEntity = g_DirectorsCutSystem.cameras[g_DirectorsCutSystem.elementIndex];
+						if (pEntity != nullptr)
+						{
+							ImGuizmo::SetID(g_DirectorsCutSystem.elementIndex);
+
+							float modelMatrix[16];
+							Vector pos = pEntity->GetAbsOrigin();
+							QAngle ang = pEntity->GetAbsAngles();
+							float s = 1.f;
+
+							static float translation[3], rotation[3], scale[3];
+
+							// Add offset (pivot) to translation
+							pos -= g_DirectorsCutSystem.pivot;
+
+							// Y up to Z up - pos is Z up, translation is Y up
+							translation[0] = -pos.y;
+							translation[1] = pos.z;
+							translation[2] = -pos.x;
+
+							rotation[0] = -ang.x;
+							rotation[1] = ang.y;
+							rotation[2] = -ang.z;
+
+							scale[0] = s;
+							scale[1] = s;
+							scale[2] = s;
+
+							ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, modelMatrix);
+							float deltaMatrix[16];
+							float deltaTranslation[3], deltaRotation[3], deltaScale[3];
+							ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode, modelMatrix, deltaMatrix, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
+							ImGuizmo::DecomposeMatrixToComponents(deltaMatrix, deltaTranslation, deltaRotation, deltaScale);
+							// Revert Z up
+							float translation2[3];
+							translation2[0] = -deltaTranslation[2];
+							translation2[1] = -deltaTranslation[0];
+							translation2[2] = deltaTranslation[1];
+							float rotation2[3];
+							rotation2[0] = -deltaRotation[0];
+							rotation2[1] = deltaRotation[1];
+							rotation2[2] = -deltaRotation[2];
+							if (ImGuizmo::IsUsing())
+							{
+								ImGui::LabelText("Delta Translation", "%f %f %f", deltaTranslation[0], deltaTranslation[1], deltaTranslation[2]);
+								ImGui::LabelText("Delta Rotation", "%f %f %f", deltaRotation[0], deltaRotation[1], deltaRotation[2]);
+								// Create source vars from new values
+								Vector newPos = Vector(0, 0, 0);
+								QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
+								if (newAng.x == 0.f && newAng.y == 0.f && newAng.z == 0.f && newAng.x == -0.f && newAng.y == -0.f && newAng.z == -0.f)
+									newPos = Vector(translation2[0], translation2[1], translation2[2]);
+								g_DirectorsCutSystem.deltaOrigin = newPos;
+								g_DirectorsCutSystem.deltaAngles = newAng;
+							}
+							else
+							{
+								g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
+								g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
+							}
+						}
+					}
+				}
+				else
+				{
+					ImGui::Text("No cameras found");
+				}
+				
+				break;
+			}
 		}
-
+		
 		ImGui::End();
-
-		ImGuizmo::SetOrthographic(g_DirectorsCutSystem.orthographic);
 
 		ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
 		ImGuizmo::SetRect(0, 0, windowWidth, windowHeight);
 
 		if (g_DirectorsCutSystem.drawGrid)
-			ImGuizmo::DrawGrid(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, g_DirectorsCutSystem.identityMatrix, 500.f);
+			ImGuizmo::DrawGrid(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, g_DirectorsCutSystem.identityMatrix, g_DirectorsCutSystem.gridSize);
 
 		ImGuizmo::ViewManipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.distance, ImVec2(windowWidth - 192, 0), ImVec2(192, 192), 0x10101010);
+
+		// info box in bottom corner
+		ImGui::SetNextWindowPos(ImVec2(windowWidth - 264 - 8, windowHeight - 96 - 8), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(264, 96), ImGuiCond_Always);
+		ImGui::Begin("Info", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoInputs);
+
+		ImGui::Text("Director's Cut");
+		ImGui::Text("Version: %s", g_DirectorsCutSystem.directorcut_version.GetVersion());
+		ImGui::Text("Author: %s", "KiwifruitDev");
+		ImGui::Text("License: %s", "MIT");
+		ImGui::Text("https://twitter.com/SFMDirectorsCut");
+	
+		ImGui::End();
 
 		ImGui::EndFrame();
 
@@ -617,12 +938,38 @@ void CDirectorsCutSystem::Shutdown()
 void CDirectorsCutSystem::LevelInitPostEntity()
 {
 	levelInit = true;
+	C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
+	if (pPlayer != nullptr)
+	{
+		// noclip
+		if (pPlayer->GetMoveType() != MOVETYPE_NOCLIP)
+		{
+			// send noclip command to server
+			engine->ClientCmd_Unrestricted("noclip");
+		}
+	}
 }
 
-void CDirectorsCutSystem::LevelShutdownPostEntity()
+void CDirectorsCutSystem::LevelShutdownPreEntity()
 {
 	levelInit = false;
-	g_DirectorsCutSystem.dags.PurgeAndDeleteElements();
+	// loop g_DirectorsCutSystem.dags to remove all entities
+	for (int i = 0; i < g_DirectorsCutSystem.dags.Count() - 1; i++)
+	{
+		g_DirectorsCutSystem.dags[i]->Remove();
+	}
+	// loop g_DirectorsCutSystem.lights to remove all lights
+	for (int i = 0; i < g_DirectorsCutSystem.lights.Count() - 1; i++)
+	{
+		g_DirectorsCutSystem.lights[i]->Remove();
+	}
+	// loop g_DirectorsCutSystem.cameras to remove all cameras
+	for (int i = 0; i < g_DirectorsCutSystem.cameras.Count() - 1; i++)
+	{
+		g_DirectorsCutSystem.cameras[i]->Remove();
+	}
+	// clear list
+	g_DirectorsCutSystem.dags.RemoveAll();
 }
 
 void CDirectorsCutSystem::Update(float frametime)
@@ -647,25 +994,100 @@ void CDirectorsCutSystem::Update(float frametime)
 			vgui::surface()->SurfaceSetCursorPos(x, y);
 		}
 	}
-	if (::input->CAM_IsOrthographic() != orthographic)
+	C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
+	if (pPlayer != nullptr)
 	{
-		if (orthographic)
+		clienttools->GetLocalPlayerEyePosition(playerOrigin, playerAngles, playerFov);
+	}
+	if (timeScale != currentTimeScale)
+	{
+		ConVar* varTimeScale = cvar->FindVar("host_timescale");
+		varTimeScale->SetValue(timeScale);
+		currentTimeScale = timeScale;
+	}
+	Vector newPos = g_DirectorsCutSystem.deltaOrigin;
+	QAngle newAng = g_DirectorsCutSystem.deltaAngles;
+	if (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f)
+	{
+		if (g_DirectorsCutSystem.elementIndex > -1)
 		{
-			int windowWidth;
-			int windowHeight;
-			vgui::surface()->GetScreenSize(windowWidth, windowHeight);
-			::input->CAM_SetOrthographicSize(windowWidth, windowHeight);
-			::input->CAM_ToOrthographic();
-		}
-		else
-		{
-			::input->CAM_ToPerspective();
+			C_BaseAnimating* pEntity;
+			CLightCustomEffect* pLight;
+			C_PointCamera* pCamera;
+			switch (g_DirectorsCutSystem.elementMode)
+			{
+			case 0:
+				pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
+				if (pEntity != nullptr)
+				{
+					if (pEntity->IsRagdoll())
+					{
+						IPhysicsObject* bone = pEntity->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex);
+						if (bone != nullptr)
+						{
+							PhysForceClearVelocity(bone);
+							bone->Wake();
+							// apply delta to bone
+							Vector origin;
+							QAngle angles;
+							bone->GetPosition(&origin, &angles);
+							angles += g_DirectorsCutSystem.deltaAngles;
+							origin += g_DirectorsCutSystem.deltaOrigin;
+							bone->SetPosition(origin, angles, true);
+						}
+					}
+					else
+					{
+						// apply delta to entity
+						Vector origin = pEntity->GetAbsOrigin();
+						QAngle angles = pEntity->GetAbsAngles();
+						angles += g_DirectorsCutSystem.deltaAngles;
+						origin += g_DirectorsCutSystem.deltaOrigin;
+						pEntity->SetAbsOrigin(origin);
+						pEntity->SetAbsAngles(angles);
+					}
+				}
+				break;
+			case 1:
+				pLight = g_DirectorsCutSystem.lights[g_DirectorsCutSystem.elementIndex];
+				if (pLight != nullptr)
+				{
+					// apply delta to entity
+					Vector origin = pLight->GetAbsOrigin();
+					QAngle angles = pLight->GetAbsAngles();
+					angles += g_DirectorsCutSystem.deltaAngles;
+					origin += g_DirectorsCutSystem.deltaOrigin;
+					pLight->SetAbsOrigin(origin);
+					pLight->SetAbsAngles(angles);
+				}
+				break;
+			case 2:
+				pCamera = g_DirectorsCutSystem.cameras[g_DirectorsCutSystem.elementIndex];
+				if (pCamera != nullptr)
+				{
+					// apply delta to entity
+					Vector origin = pCamera->GetAbsOrigin();
+					QAngle angles = pCamera->GetAbsAngles();
+					angles += g_DirectorsCutSystem.deltaAngles;
+					origin += g_DirectorsCutSystem.deltaOrigin;
+					pCamera->SetAbsOrigin(origin);
+					pCamera->SetAbsAngles(angles);
+				}
+				break;
+			}
 		}
 	}
-	C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
-	if (pPlayer)
+	for (int i = 0; i < g_DirectorsCutSystem.lights.Count(); i++)
 	{
-		clienttools->GetLocalPlayerEyePosition(g_DirectorsCutSystem.playerOrigin, g_DirectorsCutSystem.playerAngles, g_DirectorsCutSystem.playerFov);
+		CLightCustomEffect* light = g_DirectorsCutSystem.lights[i];
+		if (light != nullptr)
+		{
+			// get dir, right, and up from angles
+			QAngle angles = light->GetAbsAngles();
+			Vector dir, right, up;
+			AngleVectors(angles, &dir, &right, &up);
+			light->UpdateLight(light->GetAbsOrigin(), dir, right, up, 1000);
+		}
 	}
 }
 
@@ -731,27 +1153,89 @@ C_BaseAnimating* CreateDag(char* modelName, bool add, bool setIndex)
 	return pEntity;
 }
 
+CLightCustomEffect* CreateLight(char* texture, bool add, bool setIndex)
+{
+	CLightCustomEffect* pEntity = new CLightCustomEffect();
+	if (!pEntity)
+	{
+		Msg("Director's Cut: Failed to create light with texture %s\n", texture);
+		return nullptr;
+	}
+	/*
+	CTextureReference textureReference;
+	textureReference.Init(materials->FindTexture(texture, TEXTURE_GROUP_OTHER));
+	pEntity->SetSpotlightTextureName(texture);
+	pEntity->SetTextureReference(textureReference);
+	pEntity->SetForceUpdate(true);
+	pEntity->SetLightFov(90.f);
+	pEntity->SetLightHorizontalFov(90.f);
+	pEntity->SetShadowQuality(1);
+	pEntity->SetLightWorld(true);
+	pEntity->SetNearZ(4.f);
+	pEntity->SetFarZ(750.f);
+	pEntity->SetState(true);
+	*/
+	// Add entity to list
+	if (add)
+	{
+		g_DirectorsCutSystem.lights.AddToTail(pEntity);
+		if (setIndex)
+			g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.lights.Count() - 1;
+	}
+	Msg("Director's Cut: Created light with texture name %s\n", texture);
+	return pEntity;
+}
+
+C_PointCamera* CreateCamera(bool add, bool setIndex)
+{
+	C_PointCamera* pEntity = new C_PointCamera();
+	if (!pEntity)
+	{
+		Msg("Director's Cut: Failed to create camera\n");
+		return nullptr;
+	}
+	// Add entity to list
+	if (add)
+	{
+		g_DirectorsCutSystem.cameras.AddToTail(pEntity);
+		if (setIndex)
+			g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.cameras.Count() - 1;
+	}
+	Msg("Director's Cut: Created camera\n");
+	return pEntity;
+}
+
 C_BaseAnimating* MakeRagdoll(C_BaseAnimating* dag)
 {
-	C_BaseAnimating* ragdoll = dag->BecomeRagdollOnClient();
-	if (ragdoll)
+	if (modelinfo->GetVCollide(dag->GetModelIndex()) == nullptr)
 	{
+		Msg("Director's Cut: Model %s has no vcollide\n", dag->GetModelName());
+		return nullptr;
+	}
+	C_BaseAnimating* ragdoll = dag->BecomeRagdollOnClient();
+	if (ragdoll != nullptr)
+	{
+		IPhysicsObject* pPhys = dag->VPhysicsGetObject();
+		if (pPhys)
+		{
+			pPhys->SetPosition(dag->GetAbsOrigin(), dag->GetAbsAngles(), true);
+		}
+		/*
 		// Freeze all bones
 		CRagdoll* cRagdoll = ragdoll->m_pRagdoll;
-		if (cRagdoll)
+		if (cRagdoll != nullptr)
 		{
-			for (int i = 0; i < cRagdoll->RagdollBoneCount() - 1; i++)
+			for (int i = 0; i < cRagdoll->RagdollBoneCount(); i++)
 			{
+				ragdoll->GetBoneForWrite(i);
 				IPhysicsObject* bone = cRagdoll->GetElement(i);
-				if (bone)
+				if (bone != nullptr)
 				{
-					PhysForceClearVelocity(bone);
-					bone->Sleep();
 					bone->EnableMotion(false);
-					PhysForceClearVelocity(bone);
 				}
 			}
 		}
+		*/
 		return ragdoll;
 	}
 	return nullptr;
@@ -760,7 +1244,7 @@ C_BaseAnimating* MakeRagdoll(C_BaseAnimating* dag)
 C_BaseAnimating* MakeRagdoll(C_BaseAnimating* dag, bool add, bool setIndex)
 {
 	C_BaseAnimating* ragdoll = MakeRagdoll(dag);
-	if (ragdoll)
+	if (ragdoll != nullptr)
 	{
 		// Add entity to list
 		if (add)
@@ -782,10 +1266,10 @@ C_BaseAnimating* CreateRagdoll(char* modelName, bool add, bool setIndex)
 {
 	// Init ragdoll
 	C_BaseAnimating* pEntity = CreateDag(modelName, false, false);
-	if (pEntity)
+	if (pEntity != nullptr)
 	{
 		C_BaseAnimating* ragdoll = MakeRagdoll(pEntity, add, setIndex);
-		if (ragdoll)
+		if (ragdoll != nullptr)
 		{
 			return ragdoll;
 		}

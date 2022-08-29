@@ -8,81 +8,65 @@
 #include "cbase.h"
 
 #include "dag_entity.h"
-#include "vcollide_parse.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-C_DagEntity::C_DagEntity()
+CLightCustomEffect::CLightCustomEffect()
 {
-	// Set default bone matrices
-	CStudioHdr* ragdoll = GetModelPtr();
-	if (ragdoll)
+	TurnOn();
+}
+
+CLightCustomEffect::~CLightCustomEffect()
+{
+	if (m_FlashlightHandle != CLIENTSHADOW_INVALID_HANDLE)
 	{
-		// Bruteforced?
-		m_BoneAccessor.SetWritableBones(BONE_USED_BY_ANYTHING);
-		m_BoneAccessor.SetReadableBones(BONE_USED_BY_ANYTHING);
-		for (int i = 0; i < ragdoll->numbones(); i++)
-		{
-			mstudiobone_t* bone = ragdoll->pBone(i);
-			if (bone)
-			{
-				// Get local space bone matrix
-				Vector pos = bone->pos;
-				QAngle ang;
-				QuaternionAngles(bone->quat, ang);
-				matrix3x4_t localMatrix;
-				AngleMatrix(ang, pos, localMatrix);
-				// Get world space entity matrix
-				Vector absorigin = GetAbsOrigin();
-				QAngle absangles = GetAbsAngles();
-				matrix3x4_t worldMatrix;
-				AngleMatrix(absangles, absorigin, worldMatrix);
-				// Get world space bone matrix
-				matrix3x4_t boneMatrix;
-				ConcatTransforms(worldMatrix, localMatrix, boneMatrix);
-				// Set bone matrix
-				m_BoneMatrices[i] = boneMatrix;
-			}
-		}
+		g_pClientShadowMgr->DestroyFlashlight(m_FlashlightHandle);
+		m_FlashlightHandle = CLIENTSHADOW_INVALID_HANDLE;
 	}
 }
 
-bool C_DagEntity::InitializeAsClientEntityByHandle(model_t* pModel, RenderGroup_t renderGroup)
+void CLightCustomEffect::UpdateLight(const Vector& vecPos, const Vector& vecDir, const Vector& vecRight, const Vector& vecUp, int nDistance)
 {
-	index = -1;
+	if (IsOn() == false)
+		return;
 
-	// Setup model data.
-	SetModelPointer(pModel);
+	FlashlightState_t state;
+	Vector basisX, basisY, basisZ;
+	basisX = vecDir;
+	basisY = vecRight;
+	basisZ = vecUp;
+	VectorNormalize(basisX);
+	VectorNormalize(basisY);
+	VectorNormalize(basisZ);
 
-	// Add the client entity to the master entity list.
-	cl_entitylist->AddNonNetworkableEntity(GetIClientUnknown());
-	Assert(GetClientHandle() != ClientEntityList().InvalidHandle());
+	BasisToQuaternion(basisX, basisY, basisZ, state.m_quatOrientation);
 
-	// Add the client entity to the renderable "leaf system." (Renderable)
-	AddToLeafSystem(renderGroup);
+	state.m_vecLightOrigin = vecPos;
 
-	// Add the client entity to the spatial partition. (Collidable)
-	CollisionProp()->CreatePartitionHandle();
+	state.m_fHorizontalFOVDegrees = 90.0f;
+	state.m_fVerticalFOVDegrees = 90.0f;
+	state.m_fQuadraticAtten = 0.0f;
+	state.m_fLinearAtten = 100.0f;
+	state.m_fConstantAtten = 0.0f;
+	state.m_Color[0] = 1.0f;
+	state.m_Color[1] = 1.0f;
+	state.m_Color[2] = 1.0f;
+	state.m_Color[3] = 0.0f;
+	state.m_NearZ = 4.0f;
+	state.m_FarZ = 750.0f;
+	state.m_bEnableShadows = true;
+	state.m_pSpotlightTexture = m_FlashlightTexture;
+	state.m_nSpotlightTextureFrame = 0;
 
-	SpawnClientEntity();
-
-	return true;
-}
-
-void C_DagEntity::ApplyBoneMatrixTransform(matrix3x4_t& transform)
-{
-	// Apply individual bone matrices using m_BoneMatrices
-	CStudioHdr* studioHdr = GetModelPtr();
-	if (studioHdr)
+	if (GetFlashlightHandle() == CLIENTSHADOW_INVALID_HANDLE)
 	{
-		m_BoneAccessor.SetWritableBones(BONE_USED_BY_ANYTHING);
-		m_BoneAccessor.SetReadableBones(BONE_USED_BY_ANYTHING);
-		for (int i = 0; i < studioHdr->numbones(); i++)
-		{
-			matrix3x4_t& boneMatrix = GetBoneForWrite(i);
-			ConcatTransforms(boneMatrix, m_BoneMatrices[i], boneMatrix);
-		}
+		SetFlashlightHandle(g_pClientShadowMgr->CreateFlashlight(state));
 	}
-	C_BaseAnimating::ApplyBoneMatrixTransform(transform);
+	else
+	{
+		g_pClientShadowMgr->UpdateFlashlightState(GetFlashlightHandle(), state);
+	}
+
+	g_pClientShadowMgr->UpdateProjectedTexture(GetFlashlightHandle(), true);
 }

@@ -80,6 +80,7 @@
 
 // Projective textures
 #include "C_Env_Projected_Texture.h"
+#include "dag_entity.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
