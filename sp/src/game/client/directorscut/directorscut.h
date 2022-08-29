@@ -80,9 +80,11 @@ public:
 	Vector engineOrigin;
 	Vector playerOrigin;
 	Vector deltaOrigin;
+	Vector poseBoneOrigin;
 	QAngle engineAngles;
 	QAngle playerAngles;
 	QAngle deltaAngles;
+	QAngle poseBoneAngles;
 	CUtlVector< C_BaseAnimating* > dags;
 	CUtlVector< CLightCustomEffect* > lights;
 	CUtlVector < C_PointCamera* > cameras;
@@ -95,6 +97,7 @@ public:
 	int elementMode = 0;
 	int ragdollIndex = -1;
 	int boneIndex = -1;
+	int poseIndex = -1;
 	int operation = 2;
 	bool useSnap = false;
 	bool orthographic = false;
@@ -103,6 +106,7 @@ public:
 	bool imguiActive = false;
 	bool levelInit = false;
 	bool drawGrid = false;
+	bool needToSetPoseBoneToPivot = false;
 };
 
 // singleton
