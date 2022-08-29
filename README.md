@@ -8,6 +8,63 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 - [Twitter](https://twitter.com/SFMDirectorsCut)
 - [Discord](discord.gg/3X3teNecWs)
 
+## Installation
+
+1. Download the [Mapbase v6.3](https://www.moddb.com/mods/mapbase/downloads/mapbase-release-build) release.
+
+1. Extract the folders into your `sourcemods` directory.
+    - This can usually be found in `C:\Program Files (x86)\Steam\steamapps\sourcemods`.
+
+1. Download the latest [Director's Cut release](https://github.com/TeamPopplio/directorscut/releases)
+
+1. Extract `directorscut` into your `sourcemods` directory.
+
+1. Restart Steam and run the game.
+
+## Usage
+
+1. Load a map using console (`~`).
+    - `map stage` for example
+
+1. Press F1 and F2 until the UI is interactable.
+
+1. Use the top slider in the "Dags" menu to select the type of object to spawn.
+
+1. Click "Spawn [Model / Light / Camera]" to spawn an object.
+    - Alternatively, click "Spawn [Model / Light / Camera] at Pivot" to spawn an object at the current pivot point.
+
+1. Use the transform gizmo to move or rotate the object.
+
+1. If the object is a model, click "Make Ragdoll" to turn the selected model into a ragdoll.
+
+1. Use the "Bone Index" slider to select a bone to transform.
+
+1. Press F or click "Freeze Bone" to freeze the bone in place.
+
+1. Press Z or click "Selected Bone to Pivot" to move the camera's pivot to the selected bone.
+
+1. Click "Remove Model" to delete the model.
+
+1. You can scroll in/out to zoom the viewport camera.
+
+1. Press F2 to toggle the UI.
+
+1. Press F5 to save a screenshot.
+
+## Controls
+
+- Q: Selected object to pivot
+- Z: Selected bone to pivot
+- T: Translate mode
+- R: Rotate mode
+- Y: Universal mode
+- L: Toggle local/world space
+- F: Toggle frozen bone
+- Mouse Wheel: Zoom viewport
+- F1: Toggle UI input
+- F2: Toggle UI visibility
+- F5: Write JPEG screenshot
+
 ## Building
 
 1. Use the Visual Studio command prompt to execute these commands:
@@ -30,6 +87,7 @@ mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..
 1. Download the [Mapbase v6.3](https://www.moddb.com/mods/mapbase/downloads/mapbase-release-build) release.
 
 1. Place the Mapbase folders in your `sourcemods` folder.
+    - This can usually be found in `C:\Program Files (x86)\Steam\steamapps\sourcemods`.
 
 1. Copy `discord-rpc.dll` from the Mapbase release to the `directorscut\sp\game\directorscut\bin` folder.
 

@@ -216,7 +216,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 					elementC = nullptr;
 				if (elementC != nullptr)
 				{
-					if (ImGui::Button("Selected Light to Pivot") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+					if (ImGui::Button("Selected Camera to Pivot") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
 					{
 						g_DirectorsCutSystem.pivot = elementC->GetAbsOrigin();
 					}
