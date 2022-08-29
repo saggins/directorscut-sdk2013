@@ -1,127 +1,6 @@
-# Director's Cut
+Source SDK 2013
+===============
 
-Rebuilding the Source Filmmaker from scratch. By the community, for the community.
-
-## Links
-
-- [GitHub](https://github.com/teampopplio/directorscut)
-- [Twitter](https://twitter.com/SFMDirectorsCut)
-- [Discord](discord.gg/3X3teNecWs)
-
-## Installation
-
-1. Install [Source SDK 2013 Singleplayer](steam://install/243730) through Steam.
-
-1. Set the beta branch to `upcoming` through properties for Source SDK 2013 Singleplayer.
-
-1. Download the [Mapbase v6.3](https://www.moddb.com/mods/mapbase/downloads/mapbase-release-build) release.
-
-1. Extract the folders into your `sourcemods` directory.
-    - This can usually be found in `C:\Program Files (x86)\Steam\steamapps\sourcemods`.
-
-1. Download the latest [Director's Cut release](https://github.com/TeamPopplio/directorscut/releases).
-
-1. Extract `directorscut` into your `sourcemods` directory.
-
-1. Restart Steam and run the game as "Director's Cut".
-
-## Usage
-
-1. Load a map using console (`~`).
-    - `map stage` for example
-    - You may need to enable the developer console in advanced keyboard settings first.
-
-1. Press F1 and F2 until the UI is interactable.
-
-1. Use the top slider in the "Dags" menu to select the type of object to spawn.
-
-1. Click "Spawn [Model / Light / Camera]" to spawn an object.
-    - Alternatively, click "Spawn [Model / Light / Camera] at Pivot" to spawn an object at the current pivot point.
-
-1. Use the transform gizmo to move or rotate the object.
-
-1. If the object is a model, click "Make Ragdoll" to turn the selected model into a ragdoll.
-
-1. Use the "Bone Index" slider to select a bone to transform.
-
-1. Press F or click "Freeze Bone" to freeze the bone in place.
-
-1. Press Z or click "Selected Bone to Pivot" to move the camera's pivot to the selected bone.
-
-1. Click "Remove Model" to delete the model.
-
-1. You can scroll in/out to zoom the viewport camera.
-
-1. Press F2 to toggle the UI.
-
-1. Press F5 to save a screenshot.
-
-## Controls
-
-- Q: Selected object to pivot
-- Z: Selected bone to pivot
-- T: Translate mode
-- R: Rotate mode
-- Y: Universal mode
-- L: Toggle local/world space
-- F: Toggle frozen bone
-- Mouse Wheel: Zoom viewport
-- F1: Toggle UI input
-- F2: Toggle UI visibility
-- F5: Write JPEG screenshot
-
-## Building
-
-1. Use the Visual Studio command prompt to execute these commands:
-
-```batch
-git clone https://github.com/TeamPopplio/directorscut.git
-directorscut\sp\src\createdirectorscut.bat
-git clone https://github.com/TeamPopplio/ImGui-CMake-Installer-v1.88.git
-cd ImGui-CMake-Installer-v1.88
-git checkout vs2013
-mkdir build
-cd build
-cmake .. -G "Visual Studio 12 2013" -A Win32 -DIMGUI_STATIC_LIBRARY=OFF -DIMGUI_IMPL_DX9=ON
-cmake --build . --config Release
-mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..\..\directorscut\sp\game\directorscut
-```
-
-1. Copy `bin\Release\imgui.dll` to the `directorscut\sp\game\directorscut\bin` folder.
-
-1. Download the [Mapbase v6.3](https://www.moddb.com/mods/mapbase/downloads/mapbase-release-build) release.
-
-1. Place the Mapbase folders in your `sourcemods` folder.
-    - This can usually be found in `C:\Program Files (x86)\Steam\steamapps\sourcemods`.
-
-1. Copy `discord-rpc.dll` from the Mapbase release to the `directorscut\sp\game\directorscut\bin` folder.
-
-1. Copy `game_shader_dx9.dll` from the Mapbase release to the `directorscut\sp\game\directorscut\bin` folder.
-
-1. Open `directorscut\sp\src\directorscut.sln` in Visual Studio.
-
-1. Build the project as a Release build.
-
-1. Restart Steam and run the game.
-
-## References
-
-- [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)
-- [Dear Imgui](https://github.com/ocornut/imgui)
-- [Mapbase](https://github.com/mapbase-source/source-sdk-2013)
-- [Source SDK 2013](https://github.com/ValveSoftware/source-sdk-2013)
-
-## Screenshots
-
-### v0.1.0
-
-![v0.1.0](sp/game/directorscut/screenshots/stage_projection0000.jpg)
-
-## Licenses
-
-### Source SDK 2013
-
-```text
                SOURCE 1 SDK LICENSE
 
 Source SDK Copyright(c) Valve Corp.  
@@ -165,37 +44,10 @@ copyright notice and the following:
        
 If you would like to use the SDK for a commercial purpose, please contact Valve at 
 sourceengine@valvesoftware.com.
-```
 
-### Dear Imgui
+ImGuizmo
+========
 
-```text
-The MIT License (MIT)
-
-Copyright (c) 2014-2022 Omar Cornut
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### ImGuizmo
-
-```text
 The MIT License (MIT)
 
 Copyright (c) 2016 Cedric Guillemet
@@ -217,4 +69,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
+
+Dear Imgui
+==========
+
+The MIT License (MIT)
+
+Copyright (c) 2014-2022 Omar Cornut
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
