@@ -15,7 +15,7 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 1. Extract the folders into your `sourcemods` directory.
     - This can usually be found in `C:\Program Files (x86)\Steam\steamapps\sourcemods`.
 
-1. Download the latest [Director's Cut release](https://github.com/TeamPopplio/directorscut/releases)
+1. Download the latest [Director's Cut release](https://github.com/TeamPopplio/directorscut/releases).
 
 1. Extract `directorscut` into your `sourcemods` directory.
 
@@ -105,6 +105,12 @@ mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..
 - [Dear Imgui](https://github.com/ocornut/imgui)
 - [Mapbase](https://github.com/mapbase-source/source-sdk-2013)
 - [Source SDK 2013](https://github.com/ValveSoftware/source-sdk-2013)
+
+## Screenshots
+
+### v0.1.0
+
+![v0.1.0](sp/game/directorscut/screenshots/stage_projection0000.jpg)
 
 ## Licenses
 
