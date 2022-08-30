@@ -33,7 +33,7 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 
 1. Press F1 and F2 until the UI is interactable.
 
-1. Use the top slider in the "Dags" menu to select the type of object to spawn.
+1. Use the top slider in the "Elements" menu to select the type of object to spawn.
 
 1. Click "Spawn [Model / Light / Camera]" to spawn an object.
     - Alternatively, click "Spawn [Model / Light / Camera] at Pivot" to spawn an object at the current pivot point.
@@ -50,7 +50,7 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 
 1. Click "Remove Model" to delete the model.
 
-1. You can scroll in/out to zoom the viewport camera.
+1. You can scroll in/out to zoom the viewport camera, alongside using middle mouse to orbit the viewport.
 
 1. Press F2 to toggle the UI.
 
@@ -66,6 +66,7 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 - L: Toggle local/world space
 - F: Toggle frozen bone
 - Mouse Wheel: Zoom viewport
+- Middle Mouse: Orbit viewport
 - F1: Toggle UI input
 - F2: Toggle UI visibility
 - F5: Write JPEG screenshot
@@ -116,6 +117,10 @@ mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..
 ### v0.1.0
 
 ![v0.1.0](sp/game/directorscut/screenshots/stage_projection0000.jpg)
+
+### v0.1.1
+
+![v0.1.1](sp/game/directorscut/screenshots/stage_projection0001.jpg)
 
 ## Licenses
 

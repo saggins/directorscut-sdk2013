@@ -85,10 +85,10 @@ public:
 	QAngle playerAngles;
 	QAngle deltaAngles;
 	QAngle poseBoneAngles;
-	CUtlVector< C_BaseAnimating* > dags;
+	CUtlVector< CModelElement* > dags;
 	CUtlVector< CLightCustomEffect* > lights;
 	CUtlVector < C_PointCamera* > cameras;
-	Version directorcut_version = Version(0, 1, 0);
+	Version directorcut_version = Version(0, 1, 1);
 	char* directorscut_author = "KiwifruitDev";
 	std::string modelName = "models/alyx.mdl";
 	std::string lightTexture = "effects/flashlight001";
@@ -98,6 +98,7 @@ public:
 	int ragdollIndex = -1;
 	int boneIndex = -1;
 	int poseIndex = -1;
+	int flexIndex = -1;
 	int operation = 2;
 	bool useSnap = false;
 	bool orthographic = false;

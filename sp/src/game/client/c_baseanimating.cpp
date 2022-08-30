@@ -1583,7 +1583,15 @@ void C_BaseAnimating::GetCachedBoneMatrix( int boneIndex, matrix3x4_t &out )
 //-----------------------------------------------------------------------------
 // Purpose:	move position and rotation transforms into global matrices
 //-----------------------------------------------------------------------------
-void C_BaseAnimating::BuildTransformations( CStudioHdr *hdr, Vector *pos, Quaternion *q, const matrix3x4_t &cameraTransform, int boneMask, CBoneBitList &boneComputed )
+void C_BaseAnimating::BuildTransformations(CStudioHdr* hdr, Vector* pos, Quaternion* q, const matrix3x4_t& cameraTransform, int boneMask, CBoneBitList& boneComputed)
+{
+	Vector dummyVec[MAXSTUDIOBONES];
+	Quaternion dummyQuat[MAXSTUDIOBONES];
+	BuildTransformations(hdr, pos, q, cameraTransform, boneMask, boneComputed, false, dummyVec, dummyQuat);
+}
+
+// DIRECTORSCUT: https://steamcommunity.com/app/211/discussions/1/540739319616280118/
+void C_BaseAnimating::BuildTransformations( CStudioHdr *hdr, Vector *pos, Quaternion *q, const matrix3x4_t &cameraTransform, int boneMask, CBoneBitList &boneComputed, bool leaveoutbonecalc, Vector* addpos, Quaternion* addq)
 {
 	VPROF_BUDGET( "C_BaseAnimating::BuildTransformations", VPROF_BUDGETGROUP_CLIENT_ANIMATION );
 
@@ -1663,6 +1671,13 @@ void C_BaseAnimating::BuildTransformations( CStudioHdr *hdr, Vector *pos, Quater
 		}
 		else
 		{
+			if (leaveoutbonecalc)
+			{
+				pos[i].x += addpos[i].y;
+				pos[i].y += addpos[i].y;
+				pos[i].z += addpos[i].z;
+				QuaternionMult(q[i], addq[i], q[i]);
+			}
 			QuaternionMatrix( q[i], pos[i], bonematrix );
 
 			Assert( fabs( pos[i].x ) < 100000 );
@@ -2868,7 +2883,14 @@ void C_BaseAnimating::ThreadedBoneSetup()
 	g_PreviousBoneSetups.RemoveAll();
 }
 
-bool C_BaseAnimating::SetupBones( matrix3x4_t *pBoneToWorldOut, int nMaxBones, int boneMask, float currentTime )
+bool C_BaseAnimating::SetupBones(matrix3x4_t* pBoneToWorldOut, int nMaxBones, int boneMask, float currentTime)
+{
+	Vector dummyVec[MAXSTUDIOBONES];
+	Quaternion dummyQuat[MAXSTUDIOBONES];
+	return SetupBones(pBoneToWorldOut, nMaxBones, boneMask, currentTime, false, dummyVec, dummyQuat);
+}
+
+bool C_BaseAnimating::SetupBones( matrix3x4_t *pBoneToWorldOut, int nMaxBones, int boneMask, float currentTime, bool leaveoutbonecalc, Vector* addpos, Quaternion* addq)
 {
 	VPROF_BUDGET( "C_BaseAnimating::SetupBones", VPROF_BUDGETGROUP_CLIENT_ANIMATION );
 
@@ -3073,7 +3095,7 @@ bool C_BaseAnimating::SetupBones( matrix3x4_t *pBoneToWorldOut, int nMaxBones, i
 				m_pIk->SolveDependencies( pos, q, m_BoneAccessor.GetBoneArrayForWrite(), boneComputed );
 			}
 
-			BuildTransformations( hdr, pos, q, parentTransform, bonesMaskNeedRecalc, boneComputed );
+			BuildTransformations(hdr, pos, q, parentTransform, bonesMaskNeedRecalc, boneComputed, leaveoutbonecalc, addpos, addq);
 			
 			RemoveFlag( EFL_SETTING_UP_BONES );
 			ControlMouth( hdr );
