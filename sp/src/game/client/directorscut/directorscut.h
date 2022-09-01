@@ -58,7 +58,6 @@ public:
 	virtual void LevelInitPostEntity();
 	virtual void LevelShutdownPreEntity();
 	virtual void Update(float frametime);
-	virtual void PostRender();
 	void SetupEngineView(Vector &origin, QAngle &angles, float &fov);
 	void Frustum(float left, float right, float bottom, float top, float znear, float zfar, float* m16);
 	void Perspective(float fov, float aspect, float znear, float zfar, float* m16);
@@ -78,6 +77,7 @@ public:
 	float currentTimeScale = 1.f;
 	float timeScale = 1.f;
 	Vector pivot;
+	Vector newPivot;
 	Vector engineOrigin;
 	Vector playerOrigin;
 	Vector deltaOrigin;
@@ -89,18 +89,21 @@ public:
 	CUtlVector< CModelElement* > dags;
 	CUtlVector< CLightCustomEffect* > lights;
 	CUtlVector < C_PointCamera* > cameras;
-	Version directorcut_version = Version(0, 1, 1);
+	Version directorcut_version = Version(0, 1, 2);
 	char* directorscut_author = "KiwifruitDev";
 	std::string modelName = "models/alyx.mdl";
 	std::string lightTexture = "effects/flashlight001";
 	int elementIndex = -1;
+	int nextElementIndex = -1;
 	int nextElementMode = 0;
 	int elementMode = 0;
 	int ragdollIndex = -1;
 	int boneIndex = -1;
 	int poseIndex = -1;
+	int nextPoseIndex = -1;
 	int flexIndex = -1;
 	int operation = 2;
+	int oldOperation = 2;
 	bool useSnap = false;
 	bool orthographic = false;
 	bool firstEndScene = true;
@@ -110,6 +113,7 @@ public:
 	bool drawGrid = false;
 	bool needToSetPoseBoneToPivot = false;
 	bool selecting = false;
+	bool justSetPivot = false;
 };
 
 // singleton

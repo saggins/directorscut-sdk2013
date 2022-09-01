@@ -1,0 +1,6 @@
+SDK_UnlitGeneric
+{
+	"$basetexture" "logo/DXLogo"
+	"$nolod" "1"
+    "$alphatest" "1"
+}

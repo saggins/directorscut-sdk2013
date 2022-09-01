@@ -1,10 +1,12 @@
 "GameInfo"
 {
 	game 		"Director's Cut"
-	title 		"HALF-LIFE'"
+	title 		""
 	title2		""
 
 	type		singleplayer_only
+
+	gamelogo 1
 
 	FileSystem
 	{

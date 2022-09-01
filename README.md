@@ -27,11 +27,11 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 
 ## Usage
 
-1. Load a map using console (`~`).
-    - `map stage` for example
-    - You may need to enable the developer console in advanced keyboard settings first.
+1. Load a map in the main menu.
+    - You can also click "Open Console" to open the console and type `map <mapname>`.
 
-1. Press F1 and F2 until the UI is interactable.
+1. Click "Toggle ImGUI Visibility" and "Toggle ImGUI Input" in the pause menu until the UI is interactable.
+    - You can also press F1 and F2 respectively to toggle these in-game.
 
 1. Use the top slider in the "Elements" menu to select the type of object to spawn.
 
@@ -40,21 +40,21 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 
 1. Use the transform gizmo to move or rotate the object.
 
-1. If the object is a model, click "Make Ragdoll" to turn the selected model into a ragdoll.
+1. If the object is a model, click "Make Physical" to create physics objects.
+    - This is currently required for some bones to be manipulated.
 
-1. Use the "Bone Index" slider to select a bone to transform.
+1. Use the "Physics Object Index" slider to select a physics object to transform.
+    - Alternatively, hold CTRL to select the physics object under the cursor as long as the index is above `-1`.
 
-1. Press F or click "Freeze Bone" to freeze the bone in place.
+1. Press F or click "Freeze Physics Object" to freeze the physics object in place.
 
-1. Press Z or click "Selected Bone to Pivot" to move the camera's pivot to the selected bone.
+1. Press Z or click "Selected Physics Object to Pivot" to move the camera's pivot to the selected physics object.
 
 1. Click "Remove Model" to delete the model.
 
 1. You can scroll in/out to zoom the viewport camera, alongside using middle mouse to orbit the viewport.
 
-1. Press F2 to toggle the UI.
-
-1. Press F5 to save a screenshot.
+1. Press F2 to toggle the UI and press F5 to save a screenshot. You've just made a poster!
 
 ## Controls
 
@@ -70,6 +70,8 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 - F1: Toggle UI input
 - F2: Toggle UI visibility
 - F5: Write JPEG screenshot
+- CTRL: While held, select objects by clicking on them
+- See UI for more controls
 
 ## Building
 
@@ -77,7 +79,7 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 
 ```batch
 git clone https://github.com/TeamPopplio/directorscut.git
-directorscut\sp\src\createdirectorscut.bat
+.\directorscut\sp\src\createdirectorscut.bat
 git clone https://github.com/TeamPopplio/ImGui-CMake-Installer-v1.88.git
 cd ImGui-CMake-Installer-v1.88
 git checkout vs2013
@@ -88,7 +90,7 @@ cmake --build . --config Release
 mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..\..\directorscut\sp\game\directorscut
 ```
 
-1. Copy `bin\Release\imgui.dll` to the `directorscut\sp\game\directorscut\bin` folder.
+1. Copy `ImGui-CMake-Installer-v1.88\vs2013\build\bin\Release\imgui.dll` to the `directorscut\sp\game\directorscut\bin` folder.
 
 1. Download the [Mapbase v6.3](https://www.moddb.com/mods/mapbase/downloads/mapbase-release-build) release.
 
@@ -101,18 +103,13 @@ mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..
 
 1. Open `directorscut\sp\src\directorscut.sln` in Visual Studio.
 
-1. Build the project as a Release build.
-
-1. Restart Steam and run the game.
-
-## References
-
-- [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)
-- [Dear Imgui](https://github.com/ocornut/imgui)
-- [Mapbase](https://github.com/mapbase-source/source-sdk-2013)
-- [Source SDK 2013](https://github.com/ValveSoftware/source-sdk-2013)
+1. Build the project, restart Steam, and run the game.
 
 ## Screenshots
+
+### v0.1.2
+
+![v0.1.2](sp/game/directorscut/screenshots/snapshot0000.jpg)
 
 ### v0.1.1
 
@@ -121,6 +118,13 @@ mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..
 ### v0.1.0
 
 ![v0.1.0](sp/game/directorscut/screenshots/stage_projection0000.jpg)
+
+## References
+
+- [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)
+- [Dear Imgui](https://github.com/ocornut/imgui)
+- [Mapbase](https://github.com/mapbase-source/source-sdk-2013)
+- [Source SDK 2013](https://github.com/ValveSoftware/source-sdk-2013)
 
 ## Licenses
 
