@@ -58,6 +58,7 @@ public:
 	virtual void LevelInitPostEntity();
 	virtual void LevelShutdownPreEntity();
 	virtual void Update(float frametime);
+	virtual void PostRender();
 	void SetupEngineView(Vector &origin, QAngle &angles, float &fov);
 	void Frustum(float left, float right, float bottom, float top, float znear, float zfar, float* m16);
 	void Perspective(float fov, float aspect, float znear, float zfar, float* m16);
@@ -108,6 +109,7 @@ public:
 	bool levelInit = false;
 	bool drawGrid = false;
 	bool needToSetPoseBoneToPivot = false;
+	bool selecting = false;
 };
 
 // singleton

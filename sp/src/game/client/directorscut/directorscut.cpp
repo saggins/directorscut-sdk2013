@@ -49,9 +49,10 @@ CModelElement* MakeRagdoll(CModelElement* dag, bool add, bool setIndex);
 
 ConVar cvar_imgui_enabled("dx_imgui_enabled", "1", FCVAR_ARCHIVE, "Enable ImGui");
 ConVar cvar_imgui_input_enabled("dx_imgui_input_enabled", "1", FCVAR_ARCHIVE, "Capture ImGui input");
-ConVar cvar_dx_zoom_distance("dx_zoom_distance", "10.0f", FCVAR_ARCHIVE, "Default zoom distance");
+ConVar cvar_dx_zoom_distance("dx_zoom_distance", "5.0f", FCVAR_ARCHIVE, "Default zoom distance");
 ConVar cvar_dx_orbit_sensitivity("dx_orbit_sensitivity", "0.1f", FCVAR_ARCHIVE, "Middle click orbit sensitivity");
 ConVar cvar_dx_pan_sensitivity("dx_pan_sensitivity", "0.1f", FCVAR_ARCHIVE, "Shift + middle click pan sensitivity");
+
 ConCommand cmd_imgui_toggle("dx_imgui_toggle", [](const CCommand& args) {
 	cvar_imgui_enabled.SetValue(!cvar_imgui_enabled.GetBool());
 }, "Toggle ImGui", FCVAR_ARCHIVE);
@@ -70,6 +71,14 @@ ConCommand cmd_create_ragdoll("dx_create_ragdoll", [](const CCommand& args) {
 		modelName = (char*)args.Arg(1);
 	CreateRagdoll(modelName, true, true);
 }, "Create ragdoll", FCVAR_ARCHIVE);
+
+ConCommand cmd_in_select_elements("+dx_select", [](const CCommand& args) {
+	g_DirectorsCutSystem.selecting = true;
+}, "Select elements", FCVAR_ARCHIVE);
+
+ConCommand cmd_out_select_elements("-dx_select", [](const CCommand& args) {
+	g_DirectorsCutSystem.selecting = false;
+}, "Select elements", FCVAR_ARCHIVE);
 
 WNDPROC ogWndProc = nullptr;
 
@@ -104,7 +113,211 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 		ImGui::NewFrame();
 		ImGuizmo::BeginFrame();
-		
+
+		// add menu buttons at top
+		if (ImGui::BeginMainMenuBar())
+		{
+			if (ImGui::BeginMenu("File"))
+			{
+				/*
+				if (ImGui::MenuItem("New"))
+				{
+				}
+				*/
+				if (ImGui::MenuItem("Open"))
+				{
+
+				}
+				if (ImGui::MenuItem("Save"))
+				{
+				}
+				if (ImGui::MenuItem("Save As"))
+				{
+				}
+				ImGui::EndMenu();
+			}
+			ImGui::EndMainMenuBar();
+		}
+
+		// element viewer (tree window)
+		// set up window
+		ImGui::SetNextWindowPos(ImVec2(windowWidth - 8, 19 + 8), 0, ImVec2(1.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(264, windowHeight - 96 - 19 - 24), 0);
+		ImGui::Begin("Inspector", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_HorizontalScrollbar);
+
+		// root tree node
+		if (ImGui::TreeNodeEx("Root", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			if (ImGui::TreeNodeEx("Models", ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				for (int i = 0; i < g_DirectorsCutSystem.dags.Count(); i++)
+				{
+					CModelElement* dag = g_DirectorsCutSystem.dags[i];
+					// use i as name for tree node
+					// special case for models: use model name
+					char name[MAXCHAR];
+					sprintf(name, "%d (%s)", i, dag->GetModelName());
+					if (ImGui::TreeNode(name))
+					{
+						if (ImGui::Button("Select"))
+						{
+							g_DirectorsCutSystem.elementMode = 0; // model mode
+							g_DirectorsCutSystem.elementIndex = i;
+							g_DirectorsCutSystem.boneIndex = -1;
+							g_DirectorsCutSystem.poseIndex = -1;
+						}
+						// show position
+						Vector pos = dag->GetAbsOrigin();
+						ImGui::Text("Position: %.2f %.2f %.2f", pos.x, pos.y, pos.z);
+						// show rotation
+						QAngle rot = dag->GetAbsAngles();
+						ImGui::Text("Rotation: %.2f %.2f %.2f", rot.x, rot.y, rot.z);
+						CStudioHdr* modelPtr = dag->GetModelPtr();
+						if (modelPtr)
+						{
+							// show physics objects (ragdolls only)
+							if (dag->IsRagdoll())
+							{
+								if (ImGui::TreeNode("Physics Objects"))
+								{
+									CRagdoll* ragdoll = dag->m_pRagdoll;
+									if (ragdoll)
+									{
+										for (int j = 0; j < dag->m_pRagdoll->RagdollBoneCount(); j++)
+										{
+											IPhysicsObject* physObj = ragdoll->GetElement(j);
+											// use j as name for tree node
+											// special case for physics objects: use bone name
+											for (int k = 0; k < modelPtr->numbones(); k++)
+											{
+												mstudiobone_t* bone = modelPtr->pBone(k);
+												if (bone != nullptr)
+												{
+													if (bone->physicsbone == j)
+													{
+														char name[MAXCHAR];
+														sprintf(name, "%d (%s)", j, bone->pszName());
+														if (ImGui::TreeNode(name))
+														{
+															if (ImGui::Button("Select"))
+															{
+																g_DirectorsCutSystem.elementMode = 0;
+																g_DirectorsCutSystem.elementIndex = i;
+																g_DirectorsCutSystem.boneIndex = j;
+																g_DirectorsCutSystem.poseIndex = -1;
+															}
+															// show position
+															Vector worldVec;
+															QAngle worldAng;
+															physObj->GetPosition(&worldVec, &worldAng);
+															ImGui::Text("Position: %.2f %.2f %.2f", worldVec.x, worldVec.y, worldVec.z);
+															// show rotation
+															ImGui::Text("Rotation: %.2f %.2f %.2f", worldAng.x, worldAng.y, worldAng.z);
+															ImGui::TreePop();
+														}
+														break;
+													}
+												}
+											}
+										}
+										ImGui::TreePop();
+									}
+								}
+							}
+							// show pose bones
+							if (ImGui::TreeNode("Pose Bones"))
+							{
+								for (int j = 0; j < modelPtr->numbones(); j++)
+								{
+									mstudiobone_t* bone = modelPtr->pBone(j);
+									if (bone != nullptr)
+									{
+										char name[MAXCHAR];
+										sprintf(name, "%d (%s)", j, bone->pszName());
+										if (ImGui::TreeNodeEx(name, ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf))
+										{
+											if (ImGui::IsItemClicked())
+											{
+												g_DirectorsCutSystem.elementMode = 0;
+												g_DirectorsCutSystem.elementIndex = i;
+												g_DirectorsCutSystem.boneIndex = -1;
+												g_DirectorsCutSystem.poseIndex = j;
+											}
+											// FIXME: can't show position in drawing code!
+											ImGui::TreePop();
+										}
+									}
+								}
+								ImGui::TreePop();
+							}
+						}
+						ImGui::TreePop();
+					}
+				}
+				ImGui::TreePop();
+			}
+			if (ImGui::TreeNodeEx("Lights", ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				for (int i = 0; i < g_DirectorsCutSystem.lights.Count(); i++)
+				{
+					CLightCustomEffect* dag = g_DirectorsCutSystem.lights[i];
+					// use i as name for tree node
+					char name[10];
+					sprintf(name, "%d", i);
+					if (ImGui::TreeNode(name))
+					{
+						if (ImGui::Button("Select"))
+						{
+							g_DirectorsCutSystem.elementMode = 1; // light mode
+							g_DirectorsCutSystem.elementIndex = i;
+							g_DirectorsCutSystem.boneIndex = -1;
+							g_DirectorsCutSystem.poseIndex = -1;
+						}
+						// show position
+						Vector pos = dag->GetAbsOrigin();
+						ImGui::Text("Position: %.2f %.2f %.2f", pos.x, pos.y, pos.z);
+						// show rotation
+						QAngle rot = dag->GetAbsAngles();
+						ImGui::Text("Rotation: %.2f %.2f %.2f", rot.x, rot.y, rot.z);
+						ImGui::TreePop();
+					}
+				}
+				ImGui::TreePop();
+			}
+
+			if (ImGui::TreeNodeEx("Cameras", ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				for (int i = 0; i < g_DirectorsCutSystem.cameras.Count(); i++)
+				{
+					C_PointCamera* dag = g_DirectorsCutSystem.cameras[i];
+					// use i as name for tree node
+					char name[10];
+					sprintf(name, "%d", i);
+					if (ImGui::TreeNode(name))
+					{
+						if (ImGui::Button("Select"))
+						{
+							g_DirectorsCutSystem.elementMode = 2; // light mode
+							g_DirectorsCutSystem.elementIndex = i;
+							g_DirectorsCutSystem.boneIndex = -1;
+							g_DirectorsCutSystem.poseIndex = -1;
+						}
+						// show position
+						Vector pos = dag->GetAbsOrigin();
+						ImGui::Text("Position: %.2f %.2f %.2f", pos.x, pos.y, pos.z);
+						// show rotation
+						QAngle rot = dag->GetAbsAngles();
+						ImGui::Text("Rotation: %.2f %.2f %.2f", rot.x, rot.y, rot.z);
+						ImGui::TreePop();
+					}
+				}
+				ImGui::TreePop();
+			}
+		}
+
+		// end window
+		ImGui::End();
+
 		// Perspective camera view
 		// Orthographic mode is not supported
 		const CViewSetup* viewSetup = view->GetViewSetup();
@@ -311,9 +524,12 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		}
 		
 		// Operation (gizmo mode)
-		ImGui::SliderInt("Set Operation", &g_DirectorsCutSystem.operation, 0, 2);
+		ImGui::SliderInt("Set Operation", &g_DirectorsCutSystem.operation, -1, 2);
 		switch (g_DirectorsCutSystem.operation)
 		{
+			case -1:
+				ImGui::LabelText("Operation", "None");
+				break;
 			case 0:
 				ImGui::LabelText("Operation", "Translate");
 				mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
@@ -547,7 +763,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 						g_DirectorsCutSystem.flexIndex = -1;
 						pEntity->Remove();
 					}
-					if (g_DirectorsCutSystem.elementIndex > -1)
+					if (g_DirectorsCutSystem.elementIndex > -1 && g_DirectorsCutSystem.operation > -1)
 					{
 						// Retry for pEntity pointer in case we just removed it
 						pEntity = g_DirectorsCutSystem.dags[g_DirectorsCutSystem.elementIndex];
@@ -667,7 +883,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 						g_DirectorsCutSystem.boneIndex = -1;
 						pEntity->Remove();
 					}
-					if (g_DirectorsCutSystem.elementIndex > -1)
+					if (g_DirectorsCutSystem.elementIndex > -1 && g_DirectorsCutSystem.operation > -1)
 					{
 						// Retry for pEntity pointer in case we just removed it
 						pEntity = g_DirectorsCutSystem.lights[g_DirectorsCutSystem.elementIndex];
@@ -775,7 +991,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 						g_DirectorsCutSystem.boneIndex = -1;
 						pEntity->Remove();
 					}
-					if (g_DirectorsCutSystem.elementIndex > -1)
+					if (g_DirectorsCutSystem.elementIndex > -1 && g_DirectorsCutSystem.operation > -1)
 					{
 						// Retry for pEntity pointer in case we just removed it
 						pEntity = g_DirectorsCutSystem.cameras[g_DirectorsCutSystem.elementIndex];
@@ -1065,41 +1281,127 @@ void CDirectorsCutSystem::LevelShutdownPreEntity()
 	g_DirectorsCutSystem.dags.RemoveAll();
 }
 
-/*
-bool FindChildren(int index, CStudioHdr* modelPtr, CModelElement* pEntity, Vector deltaOrigin, QAngle deltaAngles, bool first)
+void CDirectorsCutSystem::PostRender()
 {
-	//if(first)
-		//pEntity->PushAllowBoneAccess(true, true, "DirectorsCut_FindChildren");
-	
-	mstudiobone_t* topBone = modelPtr->pBone(index);
-	if (topBone->parent >= 0)
+	if (levelInit && selecting && cvar_imgui_enabled.GetBool() && cvar_imgui_input_enabled.GetBool())
 	{
-		for (int i = 0; i < modelPtr->numbones(); i++)
+		// holding down CTRL (selecting) should allow the user to select individual objects
+		float vector = 0.5f;
+		Vector boundMin = Vector(-vector, -vector, -vector);
+		Vector boundMax = Vector(vector, vector, vector);
+		int colorR = 196;
+		int colorG = 107;
+		int colorB = 174;
+		int colorA = 255;
+		float length = 0.1f;
+		if (elementIndex <= -1)
+			return;
+		int modelsPhysOrBones = 0;
+		if (boneIndex >= 0)
+			modelsPhysOrBones = 1;
+		if (poseIndex >= 0)
+			modelsPhysOrBones = 2;
+		switch (elementMode)
 		{
-			mstudiobone_t* bonePtr = modelPtr->pBone(i);
-			if (bonePtr->parent == index)
+		case 0:
+			if (modelsPhysOrBones == 0)
 			{
-				Vector childPos;
-				QAngle childAngles;
-				MatrixAngles(pEntity->boneMatrices[i], childAngles, childPos);
-				// When rotating, positions should update relative to the parent bone using directions
-				Vector newPos = childPos + deltaOrigin;
-				QAngle newAngles = childAngles + deltaAngles;
-				AngleMatrix(newAngles, newPos, pEntity->boneMatrices[i]);
-				// Recursion
-				return FindChildren(i, modelPtr, pEntity, deltaOrigin, deltaAngles, false);
+				// loop all models
+				for (int i = 0; i < g_DirectorsCutSystem.dags.Count(); i++)
+				{
+					// draw model locations and names
+					CModelElement* model = g_DirectorsCutSystem.dags[i];
+					NDebugOverlay::Box(model->GetAbsOrigin(), boundMin, boundMax, colorR, colorG, colorB, colorA, length);
+					NDebugOverlay::EntityTextAtPosition(model->GetAbsOrigin(), 0, model->GetModelName(), length, colorR, colorG, colorB, colorA);
+				}
 			}
+			else
+			{
+				// use the current model
+				CModelElement* pEntity = g_DirectorsCutSystem.dags[elementIndex];
+				CStudioHdr* modelPtr = pEntity->GetModelPtr();
+				if (modelPtr != nullptr)
+				{
+					if (pEntity != nullptr)
+					{
+						if (modelsPhysOrBones == 1)
+						{
+							// loop all physics objects
+							CRagdoll* pRagdoll = pEntity->m_pRagdoll;
+							if (pRagdoll != nullptr)
+							{
+								for (int i = 0; i < pRagdoll->RagdollBoneCount(); i++)
+								{
+									IPhysicsObject* pPhys = pRagdoll->GetElement(i);
+									if (pPhys != nullptr)
+									{
+										// draw physics object locations and names
+										for (int j = 0; j < modelPtr->numbones(); j++)
+										{
+											mstudiobone_t* bone = modelPtr->pBone(j);
+											if (bone != nullptr)
+											{
+												if (bone->physicsbone == i)
+												{
+													Vector physPos;
+													QAngle physAngles;
+													pPhys->GetPosition(&physPos, &physAngles);
+													NDebugOverlay::Box(physPos, boundMin, boundMax, colorR, colorG, colorB, colorA, length);
+													NDebugOverlay::EntityTextAtPosition(physPos, 0, bone->pszName(), length, colorR, colorG, colorB, colorA);
+													break;
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+						else if(modelsPhysOrBones == 2)
+						{
+							pEntity->PushAllowBoneAccess(true, true, "DirectorsCut_PostRender");
+							// loop all pose bones
+							for (int i = 0; i < modelPtr->numbones(); i++)
+							{
+								mstudiobone_t* bone = modelPtr->pBone(i);
+								if (bone != nullptr)
+								{
+									// draw pose bone locations and names
+									Vector worldVec;
+									QAngle worldAng;
+									MatrixAngles(pEntity->GetBoneForWrite(i), worldAng, worldVec);
+									NDebugOverlay::Box(worldVec + pEntity->posadds[i], boundMin, boundMax, colorR, colorG, colorB, colorA, length);
+									NDebugOverlay::EntityTextAtPosition(worldVec + pEntity->posadds[i], 0, bone->pszName(), length, colorR, colorG, colorB, colorA);
+								}
+							}
+							pEntity->PopBoneAccess("DirectorsCut_PostRender");
+						}
+					}
+				}
+			}
+			break;
+		case 1:
+			// loop lights
+			for (int i = 0; i < g_DirectorsCutSystem.lights.Count(); i++)
+			{
+				// draw light locations and names
+				CLightCustomEffect* light = g_DirectorsCutSystem.lights[i];
+				NDebugOverlay::Box(light->GetAbsOrigin(), boundMin, boundMax, colorR, colorG, colorB, colorA, length);
+				//NDebugOverlay::EntityTextAtPosition(light->GetAbsOrigin(), 0, light->GetModelName(), length, colorR, colorG, colorB, colorA);
+			}
+			break;
+		case 2:
+			// loop cameras
+			for (int i = 0; i < g_DirectorsCutSystem.cameras.Count(); i++)
+			{
+				// draw camera locations and names
+				C_PointCamera* camera = g_DirectorsCutSystem.cameras[i];
+				NDebugOverlay::Box(camera->GetAbsOrigin(), boundMin, boundMax, colorR, colorG, colorB, colorA, length);
+				//NDebugOverlay::EntityTextAtPosition(camera->GetAbsOrigin(), 0, camera->GetModelName(), length, colorR, colorG, colorB, colorA);
+			}
+			break;
 		}
-		//pEntity->PopBoneAccess("DirectorsCut_FindChildren");
-		return false;
-	}
-	else
-	{
-		//pEntity->PopBoneAccess("DirectorsCut_FindChildren");
-		return false;
 	}
 }
-*/
 
 void CDirectorsCutSystem::Update(float frametime)
 {
@@ -1169,21 +1471,6 @@ void CDirectorsCutSystem::Update(float frametime)
 				else if(poseIndex >= 0)
 				{
 					int poseIndexTrue = poseIndex;
-					/*
-					MatrixAngles(pEntity->boneMatrices[poseIndexTrue], poseBoneAngles, poseBoneOrigin);
-					if (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f)
-					{
-						// apply delta to pose
-						poseBoneAngles += deltaAngles;
-						poseBoneOrigin += deltaOrigin;
-						AngleMatrix(poseBoneAngles, poseBoneOrigin, pEntity->boneMatrices[poseIndexTrue]);
-
-						// Apply delta to all children of bone
-						CStudioHdr* modelPtr = pEntity->GetModelPtr();
-						if (modelPtr != nullptr)
-							FindChildren(poseIndexTrue, modelPtr, pEntity, deltaOrigin, deltaAngles, true);
-					}
-					*/
 					// pretend that the bone is in world space (it isn't)
 					pEntity->PushAllowBoneAccess(true, true, "DirectorsCut");
 					Vector worldVec;

@@ -114,13 +114,13 @@ mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..
 
 ## Screenshots
 
-### v0.1.0
-
-![v0.1.0](sp/game/directorscut/screenshots/stage_projection0000.jpg)
-
 ### v0.1.1
 
 ![v0.1.1](sp/game/directorscut/screenshots/stage_projection0001.jpg)
+
+### v0.1.0
+
+![v0.1.0](sp/game/directorscut/screenshots/stage_projection0000.jpg)
 
 ## Licenses
 
