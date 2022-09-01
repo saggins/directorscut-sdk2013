@@ -1650,6 +1650,7 @@ void C_BaseAnimating::BuildTransformations( CStudioHdr *hdr, Vector *pos, Quater
 	for (int i = 0; i < hdr->numbones(); i++) 
 	{
 		// Only update bones reference by the bone mask.
+		
 		if ( !( hdr->boneFlags( i ) & boneMask ) )
 		{
 			continue;
@@ -1669,7 +1670,8 @@ void C_BaseAnimating::BuildTransformations( CStudioHdr *hdr, Vector *pos, Quater
 			// dummy operation, just used to verify in debug that this should have happened
 			GetBoneForWrite( i );
 		}
-		else
+		// DIRECTORSCUT: This probably breaks things...
+		//else
 		{
 			if (leaveoutbonecalc)
 			{

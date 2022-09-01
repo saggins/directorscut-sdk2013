@@ -8,10 +8,155 @@
 #include "cbase.h"
 
 #include "gamestringpool.h"
+#include "datacache/imdlcache.h"
+#include "networkstringtable_clientdll.h"
 #include "dag_entity.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+CDirectorsCutElement::CDirectorsCutElement()
+{
+	C_BaseEntity* pEntity = new C_BaseEntity();
+	if (!pEntity)
+	{
+		Msg("Director's Cut: Failed to create generic dag\n");
+		return;
+	}
+	SetElementPointer(pEntity);
+}
+
+CDirectorsCutElement::CDirectorsCutElement(DAG_ type, KeyValues* params)
+{
+	SetElementType(type);
+	Vector pivot = Vector(params->GetFloat("pivot_x"), params->GetFloat("pivot_y"), params->GetFloat("pivot_z"));
+	switch (type)
+	{
+	case DAG_MODEL:
+	{
+		char* modelName = (char*)params->GetString("modelName");
+
+		// Prepend "models/" if not present
+		if (strncmp(modelName, "models/", 7) != 0)
+		{
+			char newModelName[256];
+			sprintf(newModelName, "models/%s", modelName);
+			modelName = newModelName;
+		}
+		// Append ".mdl" if not present
+		if (strstr(modelName, ".mdl") == NULL)
+		{
+			char newModelName[256];
+			sprintf(newModelName, "%s.mdl", modelName);
+			modelName = newModelName;
+		}
+
+		// Cache model
+		model_t* model = (model_t*)engine->LoadModel(modelName);
+		if (!model)
+		{
+			Msg("Director's Cut: Failed to load model %s\n", modelName);
+			break;
+		}
+		INetworkStringTable* precacheTable = networkstringtable->FindTable("modelprecache");
+		if (precacheTable)
+		{
+			modelinfo->FindOrLoadModel(modelName);
+			int idx = precacheTable->AddString(false, modelName);
+			if (idx == INVALID_STRING_INDEX)
+			{
+				Msg("Director's Cut: Failed to precache model %s\n", modelName);
+			}
+		}
+
+		// Create test dag
+		CModelElement* pEntity = new CModelElement();
+		if (!pEntity)
+			break;
+		pEntity->SetModel(modelName);
+		pEntity->SetModelName(modelName);
+		pEntity->SetAbsOrigin(pivot);
+
+		// Spawn entity
+		RenderGroup_t renderGroup = RENDER_GROUP_OPAQUE_ENTITY;
+		if (!pEntity->InitializeAsClientEntity(modelName, renderGroup))
+		{
+			Msg("Director's Cut: Failed to spawn entity %s\n", modelName);
+			pEntity->Release();
+			break;
+		}
+
+		SetElementPointer(pEntity);
+		break;
+	}
+	case DAG_LIGHT:
+	{
+		char* texture = (char*)params->GetString("lightTexture");
+		CLightCustomEffect* pEntity = new CLightCustomEffect();
+		if (!pEntity)
+		{
+			Msg("Director's Cut: Failed to create light with texture %s\n", texture);
+			break;
+		}
+		pEntity->SetAbsOrigin(pivot);
+		SetElementPointer(pEntity);
+		break;
+	}
+	case DAG_CAMERA:
+	{
+		CCameraElement* pEntity = new CCameraElement();
+		if (!pEntity)
+		{
+			Msg("Director's Cut: Failed to create camera\n");
+			break;
+		}
+		pEntity->SetAbsOrigin(pivot);
+		SetElementPointer(pEntity);
+		break;
+	}
+	default:
+	{
+		C_BaseEntity* pEntity = new C_BaseEntity();
+		if (!pEntity)
+		{
+			Msg("Director's Cut: Failed to create generic dag\n");
+			break;
+		}
+		pEntity->SetAbsOrigin(pivot);
+		SetElementPointer(pEntity);
+		break;
+	}
+	}
+}
+
+CDirectorsCutElement::~CDirectorsCutElement()
+{
+	C_BaseEntity* pEntity = (C_BaseEntity*)pElement;
+	if (pEntity != nullptr)
+	{
+		pEntity->Remove();
+	}
+}
+
+void CDirectorsCutElement::SetElementType(DAG_ type)
+{
+	elementType = type;
+}
+
+DAG_ CDirectorsCutElement::GetElementType()
+{
+	return elementType;
+}
+
+void CDirectorsCutElement::SetElementPointer(void* pElement)
+{
+	this->pElement = pElement;
+}
+
+void* CDirectorsCutElement::GetElementPointer()
+{
+	return pElement;
+}
 
 CModelElement::CModelElement()
 {
@@ -42,16 +187,16 @@ void CModelElement::SetFlexWeight(LocalFlexController_t index, float value)
 
 void CModelElement::Simulate()
 {
-	BaseClass::Simulate();
+	C_BaseFlex::Simulate();
 	for (int i = 0; i < GetNumFlexControllers(); i++)
 	{
-		BaseClass::SetFlexWeight((LocalFlexController_t)i, forcedFlexes[i]);
+		C_BaseFlex::SetFlexWeight((LocalFlexController_t)i, forcedFlexes[i]);
 	}
 }
 
 bool CModelElement::SetModel(const char* pModelName)
 {
-	BaseClass::SetModel(pModelName);
+	C_BaseFlex::SetModel(pModelName);
 	return true;
 }
 
@@ -64,9 +209,9 @@ void CModelElement::PoseBones(int bonenumber, Vector pos, QAngle ang)
 
 bool CModelElement::SetupBones(matrix3x4_t* pBoneToWorldOut, int nMaxBones, int boneMask, float currentTime)
 {
-	if (firsttimesetup == false)
+	for (int i = 0; i < MAXSTUDIOBONES; i++)
 	{
-		for (int i = 0; i < MAXSTUDIOBONES; i++)
+		if (firsttimesetup == false)
 		{
 			posadds[i].x = 0;
 			posadds[i].y = 0;
@@ -75,20 +220,19 @@ bool CModelElement::SetupBones(matrix3x4_t* pBoneToWorldOut, int nMaxBones, int 
 			anglehelper[i].y = 0;
 			anglehelper[i].z = 0;
 		}
-		firsttimesetup = true;
-	}
-	for (int i = 0; i < MAXSTUDIOBONES; i++)
-	{
 		AngleQuaternion(anglehelper[i], qadds[i]);
 	}
-	return BaseClass::SetupBones(pBoneToWorldOut, nMaxBones, boneMask, currentTime, true, posadds, qadds);
+	firsttimesetup = true;
+	m_BoneAccessor.SetWritableBones(BONE_USED_BY_ANYTHING);
+	m_BoneAccessor.SetReadableBones(BONE_USED_BY_ANYTHING);
+	return C_BaseFlex::SetupBones(pBoneToWorldOut, nMaxBones, boneMask, currentTime, true, posadds, qadds);
 }
 
 inline matrix3x4_t& CModelElement::GetBoneForWrite(int iBone)
 {
 	m_BoneAccessor.SetWritableBones(BONE_USED_BY_ANYTHING);
 	m_BoneAccessor.SetReadableBones(BONE_USED_BY_ANYTHING);
-	return BaseClass::GetBoneForWrite(iBone);
+	return C_BaseFlex::GetBoneForWrite(iBone);
 }
 
 /*
@@ -289,6 +433,16 @@ CLightCustomEffect::~CLightCustomEffect()
 	}
 }
 
+void CLightCustomEffect::Simulate()
+{
+	// get dir, right, and up from angles
+	QAngle angles = GetAbsAngles();
+	Vector dir, right, up;
+	AngleVectors(angles, &dir, &right, &up);
+	UpdateLight(GetAbsOrigin(), dir, right, up, 1000);
+	BaseClass::Simulate();
+}
+
 void CLightCustomEffect::UpdateLight(const Vector& vecPos, const Vector& vecDir, const Vector& vecRight, const Vector& vecUp, int nDistance)
 {
 	if (IsOn() == false)
@@ -332,4 +486,12 @@ void CLightCustomEffect::UpdateLight(const Vector& vecPos, const Vector& vecDir,
 	}
 
 	g_pClientShadowMgr->UpdateProjectedTexture(GetFlashlightHandle(), true);
+}
+
+CCameraElement::CCameraElement()
+{
+}
+
+CCameraElement::~CCameraElement()
+{
 }

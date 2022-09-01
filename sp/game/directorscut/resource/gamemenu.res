@@ -46,18 +46,21 @@
 		"label" "TOGGLE IMGUI VISIBILITY"
 		"command" "engine dx_imgui_toggle"
 		"InGameOrder" "50"
+		"OnlyInGame" "1"
 	}
 	"6"
 	{
 		"label" "TOGGLE IMGUI INPUT"
 		"command" "engine dx_imgui_input_toggle"
 		"InGameOrder" "60"
+		"OnlyInGame" "1"
 	}
 	"6_1"
 	{
 		"label" "===================="
 		"command" ""
 		"InGameOrder" "61"
+		"OnlyInGame" "1"
 	}
 	"7"
 	{

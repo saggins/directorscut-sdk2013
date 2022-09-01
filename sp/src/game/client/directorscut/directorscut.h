@@ -13,8 +13,6 @@
 #include "mathlib/vector.h"
 #include "dag_entity.h"
 #include <string>
-#include "C_Env_Projected_Texture.h"
-#include "c_point_camera.h"
 
 class Version
 {
@@ -86,18 +84,13 @@ public:
 	QAngle playerAngles;
 	QAngle deltaAngles;
 	QAngle poseBoneAngles;
-	CUtlVector< CModelElement* > dags;
-	CUtlVector< CLightCustomEffect* > lights;
-	CUtlVector < C_PointCamera* > cameras;
-	Version directorcut_version = Version(0, 1, 2);
+	CUtlVector < CDirectorsCutElement* > elements;
+	Version directorcut_version = Version(0, 1, 3);
 	char* directorscut_author = "KiwifruitDev";
 	std::string modelName = "models/alyx.mdl";
 	std::string lightTexture = "effects/flashlight001";
 	int elementIndex = -1;
 	int nextElementIndex = -1;
-	int nextElementMode = 0;
-	int elementMode = 0;
-	int ragdollIndex = -1;
 	int boneIndex = -1;
 	int poseIndex = -1;
 	int nextPoseIndex = -1;
@@ -114,6 +107,9 @@ public:
 	bool needToSetPoseBoneToPivot = false;
 	bool selecting = false;
 	bool justSetPivot = false;
+	bool pivotMode = false;
+	bool spawnAtPivot = false;
+	bool windowVisibilities[3];
 };
 
 // singleton
