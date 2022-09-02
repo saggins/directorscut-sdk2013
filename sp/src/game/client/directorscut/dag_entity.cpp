@@ -17,6 +17,7 @@
 
 CElementPointer::CElementPointer()
 {
+	strcpy(name, "\0");
 	C_BaseEntity* pEntity = new C_BaseEntity();
 	if (!pEntity)
 	{
@@ -28,8 +29,9 @@ CElementPointer::CElementPointer()
 
 CElementPointer::CElementPointer(DAG_ type, KeyValues* params)
 {
+	strcpy(name, "\0");
 	SetType(type);
-	Vector pivot = Vector(params->GetFloat("pivot_x"), params->GetFloat("pivot_y"), params->GetFloat("pivot_z"));
+	Vector pivot = Vector(params->GetFloat("pivotX"), params->GetFloat("pivotY"), params->GetFloat("pivotZ"));
 	switch (type)
 	{
 	case DAG_MODEL:
@@ -73,9 +75,12 @@ CElementPointer::CElementPointer(DAG_ type, KeyValues* params)
 		CModelElement* pEntity = new CModelElement();
 		if (!pEntity)
 			break;
+
 		pEntity->SetModel(modelName);
 		pEntity->SetModelName(modelName);
 		pEntity->SetAbsOrigin(pivot);
+
+		pEntity->Spawn();
 
 		// Spawn entity
 		RenderGroup_t renderGroup = RENDER_GROUP_OPAQUE_ENTITY;
@@ -136,6 +141,11 @@ CElementPointer::~CElementPointer()
 	{
 		pEntity->Remove();
 	}
+	C_BaseEntity* pEntityParent = (C_BaseEntity*)pParent;
+	if (pEntityParent != nullptr)
+	{
+		pEntityParent->Remove();
+	}
 }
 
 void CElementPointer::SetType(DAG_ type)
@@ -148,9 +158,19 @@ DAG_ CElementPointer::GetType()
 	return elementType;
 }
 
+// used to avoid setting parent entity pointer
+void CElementPointer::SetPointer(void* pElement, bool setParent)
+{
+	if (setParent && this->pElement != nullptr)
+		pParent = this->pElement;
+	this->pElement = pElement;
+}
+
+// defaults to setting the previous pointer to a "parent" entity
+// that entity pointer will be removed when the element is
 void CElementPointer::SetPointer(void* pElement)
 {
-	this->pElement = pElement;
+	SetPointer(pElement, true);
 }
 
 void* CElementPointer::GetPointer()
@@ -324,8 +344,11 @@ CModelElement* CModelElement::CreateRagdollCopy()
 	SnatchModelInstance(copy);
 
 	// We need to take these from the entity
-	copy->SetAbsOrigin(GetAbsOrigin());
-	copy->SetAbsAngles(GetAbsAngles());
+	Vector origin = GetAbsOrigin();
+	QAngle angles = GetAbsAngles();
+
+	copy->SetAbsOrigin(origin);
+	copy->SetAbsAngles(angles);
 
 	copy->IgniteRagdoll(this);
 	copy->TransferDissolveFrom(this);
@@ -337,6 +360,34 @@ CModelElement* CModelElement::CreateRagdollCopy()
 	{
 		copy->AddEffects(EF_NOSHADOW);
 	}
+
+	// Copy posadds/qadds
+	copy->firsttimesetup = firsttimesetup;
+	for (int i = 0; i < MAXSTUDIOBONES; i++)
+	{
+		copy->posadds[i].x = posadds[i].x;
+		copy->posadds[i].y = posadds[i].y;
+		copy->posadds[i].z = posadds[i].z;
+		copy->anglehelper[i].x = anglehelper->x;
+		copy->anglehelper[i].y = anglehelper->y;
+		copy->anglehelper[i].z = anglehelper->z;
+	}
+
+	// Copy flexes
+	for (int i = 0; i < MAXSTUDIOFLEXCTRL; i++)
+	{
+		copy->forcedFlexes[i] = forcedFlexes[i];
+	}
+
+	copy->SetModelName(AllocPooledString(pModelName));
+	copy->SetModelScale(GetModelScale());
+	
+	// set up bones now
+	copy->SetupBones(NULL, -1, -1, gpGlobals->curtime);
+	
+	// try this again
+	copy->SetAbsOrigin(origin);
+	copy->SetAbsAngles(angles);
 
 	copy->m_nRenderFX = kRenderFxRagdoll;
 	copy->SetRenderMode(GetRenderMode());
@@ -356,9 +407,6 @@ CModelElement* CModelElement::CreateRagdollCopy()
 	copy->m_flFadeScale = m_flFadeScale;
 #endif
 
-	copy->SetModelName(AllocPooledString(pModelName));
-	copy->SetModelScale(GetModelScale());
-
 	/*
 	CStudioHdr* hdr = GetModelPtr();
 	if (hdr != NULL)
@@ -370,25 +418,6 @@ CModelElement* CModelElement::CreateRagdollCopy()
 		}
 	}
 	*/
-
-	// Copy posadds/qadds
-	copy->firsttimesetup = firsttimesetup;
-	for (int i = 0; i < MAXSTUDIOBONES; i++)
-	{
-		copy->posadds[i].x = posadds[i].x;
-		copy->posadds[i].y = posadds[i].y;
-		copy->posadds[i].z = posadds[i].z;
-		copy->qadds[i].x = qadds[i].x;
-		copy->qadds[i].y = qadds[i].y;
-		copy->qadds[i].z = qadds[i].z;
-		copy->qadds[i].w = qadds[i].w;
-	}
-
-	// Copy flexes
-	for (int i = 0; i < MAXSTUDIOFLEXCTRL; i++)
-	{
-		copy->forcedFlexes[i] = forcedFlexes[i];
-	}
 	
 	return copy;
 }

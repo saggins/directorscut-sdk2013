@@ -13,6 +13,9 @@
 #include "mathlib/vector.h"
 #include "dag_entity.h"
 #include <string>
+#include "proxyentity.h"
+#include "materialsystem/imaterial.h"
+#include "materialsystem/imaterialvar.h"
 
 class Version
 {
@@ -85,8 +88,10 @@ public:
 	QAngle deltaAngles;
 	QAngle poseBoneAngles;
 	CUtlVector < CElementPointer* > elements;
-	Version directorcut_version = Version(0, 1, 4);
+	Version directorcut_version = Version(0, 1, 5);
 	char* directorscut_author = "KiwifruitDev";
+	char modelName[CHAR_MAX];
+	char lightTexture[CHAR_MAX];
 	int elementIndex = -1;
 	int nextElementIndex = -1;
 	int boneIndex = -1;
@@ -95,22 +100,118 @@ public:
 	int flexIndex = -1;
 	int operation = 2;
 	int oldOperation = 2;
+	int hoveringInfo[3];
 	bool useSnap = false;
 	bool orthographic = false;
 	bool firstEndScene = true;
 	bool cursorState = false;
 	bool imguiActive = false;
 	bool levelInit = false;
-	//bool drawGrid = false;
 	bool selecting = false;
 	bool justSetPivot = false;
 	bool pivotMode = false;
 	bool spawnAtPivot = false;
-	bool windowVisibilities[3];
+	bool windowVisibilities[2];
 	bool inspectorDocked = true;
+	bool gotInput = false;
+	KeyValues* settings = new KeyValues("DirectorsCut_Settings");
 };
 
 // singleton
 CDirectorsCutSystem &DirectorsCutGameSystem();
+
+// TODO: move this somewhere sensible
+
+// TF2 proxy material dummies
+// eventually support will be added to modify these proxies in-editor
+// but as it stands, these classes just output "normal" values to solve texture issues
+
+class CDummyProxy : public IMaterialProxy
+{
+public:
+	virtual bool Init(IMaterial* pMaterial, KeyValues* pKeyValues);
+	virtual void OnBind(void*) {};
+	virtual void Release() {};
+	virtual IMaterial* GetMaterial();
+	IMaterial* mat;
+};
+
+class CDummyProxyResultFloat : public CDummyProxy
+{
+public:
+	virtual bool Init(IMaterial* pMaterial, KeyValues* pKeyValues);
+	IMaterialVar* resultVar;
+};
+
+class CDummyProxyResultFloatInverted : public CDummyProxy
+{
+public:
+	virtual bool Init(IMaterial* pMaterial, KeyValues* pKeyValues);
+	IMaterialVar* resultVar;
+};
+
+class CDummyProxyResultRGB : public CDummyProxy
+{
+public:
+	virtual bool Init(IMaterial* pMaterial, KeyValues* pKeyValues);
+	IMaterialVar* resultVar;
+};
+
+class CDummyProxyResultRGBInverted : public CDummyProxy
+{
+public:
+	virtual bool Init(IMaterial* pMaterial, KeyValues* pKeyValues);
+	IMaterialVar* resultVar;
+};
+
+class CDummyInvisProxy : public CDummyProxy {};
+class CDummySpyInvisProxy : public CDummyProxy {};
+class CDummyWeaponInvisProxy : public CDummyProxy {};
+class CDummyVmInvisProxy : public CDummyProxy {};
+class CDummyBuildingInvisProxy : public CDummyProxy {};
+class CDummyCommunityWeaponProxy : public CDummyProxy {};
+class CDummyInvulnLevelProxy : public CDummyProxy {};
+class CDummyBurnLevelProxy : public CDummyProxyResultFloat {};
+class CDummyYellowLevelProxy : public CDummyProxyResultFloatInverted {};
+class CDummyModelGlowColorProxy : public CDummyProxyResultRGB {};
+class CDummyItemTintColorProxy : public CDummyProxyResultRGB {};
+class CDummyBuildingRescueLevelProxy : public CDummyProxy {};
+class CDummyTeamTextureProxy : public CDummyProxy {};
+class CDummyAnimatedWeaponSheenProxy : public CDummyProxy {};
+class CDummyWeaponSkinProxy : public CDummyProxy {};
+class CDummyShieldFalloffProxy : public CDummyProxy {};
+class CDummyStatTrakIllumProxy : public CDummyProxy {};
+class CDummyStatTrakDigitProxy : public CDummyProxy {};
+class CDummyStatTrakIconProxy : public CDummyProxy {};
+class CDummyStickybombGlowColorProxy : public CDummyProxy {};
+class CDummySniperRifleChargeProxy : public CDummyProxy {};
+class CDummyHeartbeatProxy : public CDummyProxy {};
+class CDummyWheatlyEyeGlowProxy : public CDummyProxy {};
+class CDummyBenefactorLevelProxy : public CDummyProxy {};
+
+EXPOSE_INTERFACE(CDummyInvisProxy, IMaterialProxy, "invis" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummySpyInvisProxy, IMaterialProxy, "spy_invis" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyWeaponInvisProxy, IMaterialProxy, "weapon_invis" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyVmInvisProxy, IMaterialProxy, "vm_invis" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyBuildingInvisProxy, IMaterialProxy, "building_invis" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyCommunityWeaponProxy, IMaterialProxy, "CommunityWeapon" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyInvulnLevelProxy, IMaterialProxy, "InvulnLevel" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyBurnLevelProxy, IMaterialProxy, "BurnLevel" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyYellowLevelProxy, IMaterialProxy, "YellowLevel" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyModelGlowColorProxy, IMaterialProxy, "ModelGlowColor" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyItemTintColorProxy, IMaterialProxy, "ItemTintColor" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyBuildingRescueLevelProxy, IMaterialProxy, "BuildingRescueLevel" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyTeamTextureProxy, IMaterialProxy, "TeamTexture" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyAnimatedWeaponSheenProxy, IMaterialProxy, "AnimatedWeaponSheen" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyWeaponSkinProxy, IMaterialProxy, "WeaponSkin" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyShieldFalloffProxy, IMaterialProxy, "ShieldFalloff" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyStatTrakIllumProxy, IMaterialProxy, "StatTrakIllum" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyStatTrakDigitProxy, IMaterialProxy, "StatTrakDigit" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyStatTrakIconProxy, IMaterialProxy, "StatTrakIcon" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyStickybombGlowColorProxy, IMaterialProxy, "StickybombGlowColor" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummySniperRifleChargeProxy, IMaterialProxy, "SniperRifleCharge" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyHeartbeatProxy, IMaterialProxy, "Heartbeat" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyWheatlyEyeGlowProxy, IMaterialProxy, "WheatlyEyeGlow" IMATERIAL_PROXY_INTERFACE_VERSION);
+EXPOSE_INTERFACE(CDummyBenefactorLevelProxy, IMaterialProxy, "BenefactorLevel" IMATERIAL_PROXY_INTERFACE_VERSION);
 
 #endif

@@ -93,14 +93,14 @@
 			platform			|all_source_engine_paths|platform
 
 			// tf2 shared content mount
-			//game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/tf"
-			//game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/tf_movies"
-			//game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/usermod"
-			//game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/workshop"
-			//game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/tf"
-			//game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/tf_movies"
-			//game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/usermod"
-			//game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/workshop"
+			game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/tf"
+			game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/tf_movies"
+			game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/usermod"
+			game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/workshop"
+			game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/tf"
+			game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/tf_movies"
+			game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/usermod"
+			game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/workshop"
 		}
 	}
 }

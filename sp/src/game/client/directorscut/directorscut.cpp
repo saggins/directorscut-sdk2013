@@ -45,8 +45,6 @@ ConVar cvar_imgui_input_enabled("dx_imgui_input_enabled", "1", FCVAR_ARCHIVE, "C
 ConVar cvar_dx_zoom_distance("dx_zoom_distance", "5.0f", FCVAR_ARCHIVE, "Default zoom distance");
 ConVar cvar_dx_orbit_sensitivity("dx_orbit_sensitivity", "0.1f", FCVAR_ARCHIVE, "Middle click orbit sensitivity");
 ConVar cvar_dx_pan_sensitivity("dx_pan_sensitivity", "0.1f", FCVAR_ARCHIVE, "Shift + middle click pan sensitivity");
-ConVar cvar_dx_model_name("dx_model_name", "models/alyx.mdl", FCVAR_ARCHIVE, "Temporary model selection");
-ConVar cvar_dx_light_texture_name("dx_light_texture_name", "effects/flashlight001", FCVAR_ARCHIVE, "*DUMMY* Temporary light texture selection");
 
 ConCommand cmd_imgui_toggle("dx_imgui_toggle", [](const CCommand& args) {
 	cvar_imgui_enabled.SetValue(!cvar_imgui_enabled.GetBool());
@@ -77,14 +75,16 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 	{
 		g_DirectorsCutSystem.firstEndScene = false;
 		firstFrame = true;
-		if(g_DirectorsCutSystem.imguiActive)
-			ImGui_ImplDX9_Init(p_pDevice);
+		ImGui_ImplDX9_Init(p_pDevice);
 	}
 	// Only render Imgui when enabled
 	if (cvar_imgui_enabled.GetBool() && g_DirectorsCutSystem.imguiActive && !engine->IsPaused() && g_DirectorsCutSystem.levelInit)
 	{
+		g_DirectorsCutSystem.gotInput = false;
+
 		bool justRemoved = false; // failsafe for removing elements
-		bool gotInput = false;
+		bool mouseWheelTaken = false; // something captured the mouse wheel
+		bool viewDirty = false; // whether or not to re-render the viewport
 
 		ImGuiIO& io = ImGui::GetIO();
 
@@ -100,44 +100,45 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		ImGui::NewFrame();
 		ImGuizmo::BeginFrame();
 
-		// add menu buttons at top
+		// ---- menu bar ----- //
+
 		if (ImGui::BeginMainMenuBar())
 		{
 			if (ImGui::BeginMenu("File"))
 			{
-				ImGui::Text("***** DUMMY MENU *****");
-				if (ImGui::MenuItem("New"))
+				bool dummy = false;
+				if (ImGui::MenuItem("New", NULL, &dummy, false))
 				{
 				}
-				if (ImGui::MenuItem("Open"))
+				if (ImGui::MenuItem("Open", NULL, &dummy, false))
 				{
 
 				}
-				if (ImGui::MenuItem("Save"))
+				if (ImGui::MenuItem("Save", NULL, &dummy, false))
 				{
 				}
-				if (ImGui::MenuItem("Save As"))
+				if (ImGui::MenuItem("Save As", NULL, &dummy, false))
 				{
 				}
 				ImGui::EndMenu();
 			}
 			if (ImGui::BeginMenu("Edit"))
 			{
-				ImGui::Text("***** DUMMY MENU *****");
-				if (ImGui::MenuItem("Undo"))
+				bool dummy = false;
+				if (ImGui::MenuItem("Undo", NULL, &dummy, false))
 				{
 				}
-				if (ImGui::MenuItem("Redo"))
+				if (ImGui::MenuItem("Redo", NULL, &dummy, false))
 				{
 				}
+				ImGui::SliderFloat("Time Scale", &g_DirectorsCutSystem.timeScale, 0.01f, 1.f, "%.2f");
 				ImGui::EndMenu();
 			}
 			if (ImGui::BeginMenu("View"))
 			{
 				// windows -> show/hide camera window, show/hide element window, show/hide inspector window
-				ImGui::Checkbox("Camera Window", &g_DirectorsCutSystem.windowVisibilities[0]);
-				ImGui::Checkbox("Element Window & Gizmos", &g_DirectorsCutSystem.windowVisibilities[1]);
-				ImGui::Checkbox("Inspector Window", &g_DirectorsCutSystem.windowVisibilities[2]);
+				ImGui::MenuItem("Editor Window", NULL, &g_DirectorsCutSystem.windowVisibilities[0]);
+				ImGui::MenuItem("Inspector Window", NULL, &g_DirectorsCutSystem.windowVisibilities[1]);
 				ImGui::EndMenu();
 			}
 			if(ImGui::BeginMenu("About"))
@@ -150,18 +151,18 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 					ShellExecute(0, 0, "https://github.com/TeamPopplio/directorscut", 0, 0 , SW_SHOW );
 				}
 				if (ImGui::MenuItem("Twitter"))
-				{
 					ShellExecute(0, 0, "https://twitter.com/SFMDirectorsCut", 0, 0 , SW_SHOW );
-				}
 				ImGui::Text("Version: %s", g_DirectorsCutSystem.directorcut_version.GetVersion());
 				ImGui::EndMenu();
 			}
 			ImGui::EndMainMenuBar();
 		}
 
+		// ----- windows ----- //
+
 		// element viewer (tree window)
 		// set up window
-		if (g_DirectorsCutSystem.windowVisibilities[2])
+		if (g_DirectorsCutSystem.windowVisibilities[1])
 		{
 			bool docked = g_DirectorsCutSystem.inspectorDocked;
 			ImGui::SetNextWindowPos(ImVec2(windowWidth - 8, 19 + 8), 0, ImVec2(1.0f, 0.0f));
@@ -174,12 +175,66 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 				ImGui::SetNextWindowSizeConstraints(ImVec2(264, windowHeight - 96 - 19 - 24), ImVec2(windowWidth, windowHeight - 96 - 19 - 24));
 			}
 
-			ImGui::Begin("Inspector", 0, (!docked ? ImGuiWindowFlags_AlwaysAutoResize : ImGuiWindowFlags_NoResize) | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_HorizontalScrollbar);
+			ImGui::Begin("Inspector", 0, (!docked ? ImGuiWindowFlags_AlwaysAutoResize : ImGuiWindowFlags_NoResize) | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_HorizontalScrollbar);
 
-			if (ImGui::BeginMenu("Spawn"))
+			if (ImGui::IsWindowHovered())
 			{
-				if (ImGui::MenuItem("Model"))
-					CreateElement(true, true, DAG_MODEL);
+				// check for mouse wheel input
+				if (io.MouseWheel != 0)
+					mouseWheelTaken = true;
+			}
+
+			if (ImGui::BeginMenu("Create Element"))
+			{
+				if (ImGui::BeginMenu("Model"))
+				{
+					if (ImGui::MenuItem(g_DirectorsCutSystem.modelName))
+						CreateElement(true, true, DAG_MODEL);
+
+					//if (ImGui::MenuItem("Enter Model Name"))
+						//ImGui::OpenPopup("ModelEntry");
+					//if (ImGui::MenuItem("Open Model Browser"))
+						//ImGui::OpenPopup("ModelBrowser");
+
+					if (ImGui::MenuItem("Open File Browser"))
+					{
+						// it would be too tasking to add imgui file browser, so we'll just use the windows one
+						OPENFILENAME ofn;
+						char szFile[MAX_PATH] = { 0 };
+						ZeroMemory(&ofn, sizeof(ofn));
+						ofn.lStructSize = sizeof(ofn);
+						ofn.hwndOwner = NULL;
+						ofn.lpstrFile = szFile;
+						ofn.nMaxFile = sizeof(szFile);
+						// filter for .mdl files
+						ofn.lpstrFilter = "Model Files (*.mdl)\0*.mdl\0";
+						ofn.nFilterIndex = 1;
+						ofn.lpstrFileTitle = NULL;
+						ofn.nMaxFileTitle = 0;
+						ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+						// pull from exe path (wapi)
+						char exePath[MAX_PATH];
+						GetModuleFileName(NULL, exePath, MAX_PATH);
+						char* exePathEnd = strrchr(exePath, '\\');
+						*exePathEnd = '\0';
+						ofn.lpstrInitialDir = exePath;
+						if (GetOpenFileName(&ofn))
+						{
+							// relative path to the model
+							char* relativePath = strstr(szFile, "models\\");
+							// replace backslashes with forward slashes
+							for (int i = 0; i < (int)strlen(relativePath); i++)
+							{
+								if (relativePath[i] == '\\')
+									relativePath[i] = '/';
+							}
+							// create the element
+							sprintf(g_DirectorsCutSystem.modelName, "%s", relativePath);
+							CreateElement(true, true, DAG_MODEL);
+						}
+					}
+					ImGui::EndMenu();
+				}
 				if (ImGui::MenuItem("Light"))
 					CreateElement(true, true, DAG_LIGHT);
 				if (ImGui::MenuItem("Camera"))
@@ -187,6 +242,24 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 				if (ImGui::MenuItem("Generic"))
 					CreateElement(true, true, DAG_NONE);
 				ImGui::EndMenu();
+			}
+
+			// these two don't work, for now
+
+			if (ImGui::BeginPopup("ModelEntry", ImGuiWindowFlags_AlwaysAutoResize))
+			{
+				if (ImGui::InputText("Model Name", g_DirectorsCutSystem.modelName, CHAR_MAX))
+					g_DirectorsCutSystem.gotInput = true;
+				if (ImGui::Button("OK"))
+					CreateElement(true, true, DAG_MODEL);
+				ImGui::EndPopup();
+			}
+
+			if (ImGui::BeginPopup("ModelBrowser", ImGuiWindowFlags_AlwaysAutoResize))
+			{
+				ImGui::Text("Placeholder for model browser!");
+				ImGui::Text("Use model entry or file browser to load models.");
+				ImGui::EndPopup();
 			}
 
 			if (docked)
@@ -213,285 +286,322 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 				{
 					if (ImGui::BeginPopupContextWindow())
 					{
+						ImGui::Text("***** PIVOT *****");
 						// reset pivot
 						if (ImGui::MenuItem("Reset Pivot"))
 							g_DirectorsCutSystem.pivot = Vector(0, 0, 0);
-						ImGui::Text("Origin: %f %f %f", g_DirectorsCutSystem.pivot.x, g_DirectorsCutSystem.pivot.y, g_DirectorsCutSystem.pivot.z);
+						ImGui::Text("Origin: %.2f %.2f %.2f", g_DirectorsCutSystem.pivot.x, g_DirectorsCutSystem.pivot.y, g_DirectorsCutSystem.pivot.z);
 						ImGui::EndPopup();
 					}
 				}
 				ImGui::TreePop();
 			}
 
-			if (ImGui::TreeNodeEx("Elements", flags))
+			if (g_DirectorsCutSystem.elements.Count() > 0)
 			{
-
-				for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
+				if (ImGui::TreeNodeEx("Elements", flags))
 				{
-					CElementPointer* element = g_DirectorsCutSystem.elements[i];
+					for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
+					{
+						CElementPointer* element = g_DirectorsCutSystem.elements[i];
 						if (element == nullptr)
 							break;
 						DAG_ dagType = element->GetType();
 						void* elementPtr = element->GetPointer();
 						if (elementPtr == nullptr)
 							break;
-					C_BaseEntity* dag = (C_BaseEntity*)elementPtr;
-					if (dag == nullptr)
-						break;
-					// use i as name for tree node
-					char name[MAXCHAR];
-					sprintf(name, "%d", i);
-					switch (element->GetType())
-					{
-					case DAG_MODEL:
-					{
-						CModelElement* model = (CModelElement*)element->GetPointer();
-						if (model != nullptr)
-							sprintf(name, "%s (%s)", name, model->GetModelName());
-						break;
-					}
-					case DAG_LIGHT:
-						sprintf(name, "%s (Light)", name);
-						break;
-					case DAG_CAMERA:
-						sprintf(name, "%s (Camera)", name);
-						break;
-					default:
-						sprintf(name, "%s", name);
-						break;
-					}
-					if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | (dagType == DAG_MODEL ? 0 : ImGuiTreeNodeFlags_Leaf) | ((i == g_DirectorsCutSystem.elementIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
-					{
-						if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
+						C_BaseEntity* dag = (C_BaseEntity*)elementPtr;
+						if (dag == nullptr)
+							break;
+						// use i as name for tree node
+						char name[CHAR_MAX];
+						sprintf(name, "%d", i);
+						// if element->name is not empty, use that instead
+						if (element->name[0] != '\0')
+							sprintf(name, "%s (%s)", name, element->name);
+						switch (element->GetType())
 						{
-							g_DirectorsCutSystem.elementIndex = i;
-							g_DirectorsCutSystem.boneIndex = -1;
-							g_DirectorsCutSystem.nextPoseIndex = -1;
+						case DAG_MODEL:
+						{
+							CModelElement* model = (CModelElement*)element->GetPointer();
+							if (model != nullptr)
+								sprintf(name, "%s (%s)", name, model->GetModelName());
+							break;
 						}
-						if (g_DirectorsCutSystem.elementIndex == i)
+						case DAG_LIGHT:
+							sprintf(name, "%s (Light)", name);
+							break;
+						case DAG_CAMERA:
+							sprintf(name, "%s (Camera)", name);
+							break;
+						default:
+							sprintf(name, "%s", name);
+							break;
+						}
+						if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | (dagType == DAG_MODEL ? 0 : ImGuiTreeNodeFlags_Leaf) | ((i == g_DirectorsCutSystem.elementIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
 						{
-							if (ImGui::BeginPopupContextItem("Element"))
+							if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
 							{
-								switch (element->GetType())
-								{
-								case DAG_MODEL:
-								{
-									ImGui::Text("***** MODEL *****");
-									break;
-								}
-								case DAG_LIGHT:
-									ImGui::Text("***** LIGHT *****");
-									break;
-								case DAG_CAMERA:
-									ImGui::Text("***** CAMERA *****");
-									break;
-								default:
-									ImGui::Text("***** ELEMENT *****");
-									break;
-								}
-								Vector origin = dag->GetAbsOrigin();
-								QAngle angles = dag->GetAbsAngles();
-								if (element->GetType() == DAG_MODEL)
-								{
-									CModelElement* pEntity = (CModelElement*)dag;
-									if (pEntity != nullptr)
-									{
-										CStudioHdr* modelPtr = pEntity->GetModelPtr();
-										if (modelPtr)
-										{
-											if (pEntity->IsRagdoll())
-											{
-												//ImGui::SliderInt("Physics Object Index", &g_DirectorsCutSystem.boneIndex, -1, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
-												CRagdoll* ragdoll = pEntity->m_pRagdoll;
-												if (ragdoll != nullptr)
-												{
-													if (ImGui::MenuItem("Freeze All"))
-													{
-														for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
-														{
-															IPhysicsObject* bone = ragdoll->GetElement(i);
-															if (bone != nullptr)
-															{
-																PhysForceClearVelocity(bone);
-																bone->Sleep();
-																bone->EnableMotion(false);
-																PhysForceClearVelocity(bone);
-															}
-														}
-													}
-													if (ImGui::MenuItem("Unfreeze All"))
-													{
-														for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
-														{
-															IPhysicsObject* bone = ragdoll->GetElement(i);
-															if (bone != nullptr)
-															{
-																PhysForceClearVelocity(bone);
-																bone->EnableMotion(true);
-																bone->Wake();
-																PhysForceClearVelocity(bone);
-															}
-														}
-													}
-												}
-											}
-											else if (modelinfo->GetVCollide(pEntity->GetModelIndex()) != nullptr)
-											{
-												if (ImGui::MenuItem("Make Physical"))
-												{
-													//g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
-													//g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
-													g_DirectorsCutSystem.boneIndex = 0;
-													g_DirectorsCutSystem.poseIndex = -1;
-													MakeRagdoll(pEntity, g_DirectorsCutSystem.elementIndex);
-												}
-											}
-										}
-									}
-								}
-								// remove element
-								if (ImGui::MenuItem("Remove"))
-								{
-									delete element;
-									g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
-									g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
-									g_DirectorsCutSystem.boneIndex = -1;
-									g_DirectorsCutSystem.nextPoseIndex = -1;
-									g_DirectorsCutSystem.flexIndex = -1;
-									justRemoved = true;
-								}
-								ImGui::Text("Origin: %f %f %f", origin.x, origin.y, origin.z);
-								ImGui::Text("Angles: %f %f %f", angles.x, angles.y, angles.z);
-								ImGui::EndPopup();
+								g_DirectorsCutSystem.elementIndex = i;
+								g_DirectorsCutSystem.boneIndex = -1;
+								g_DirectorsCutSystem.nextPoseIndex = -1;
+								g_DirectorsCutSystem.flexIndex = -1;
 							}
-						}
-						if (!justRemoved)
-						{
-							if (dagType == DAG_MODEL)
+							if (g_DirectorsCutSystem.elementIndex == i)
 							{
-								CModelElement* modelDag = (CModelElement*)elementPtr;
-								CStudioHdr* modelPtr = modelDag->GetModelPtr();
-								if (modelPtr)
+								if (ImGui::BeginPopupContextItem("Element"))
 								{
-									// show physics objects (ragdolls only)
-									if (modelDag->IsRagdoll())
+									switch (element->GetType())
 									{
-										if (ImGui::TreeNodeEx("Physics Objects", flags))
+									case DAG_MODEL:
+									{
+										ImGui::Text("***** MODEL *****");
+										break;
+									}
+									case DAG_LIGHT:
+										ImGui::Text("***** LIGHT *****");
+										break;
+									case DAG_CAMERA:
+										ImGui::Text("***** CAMERA *****");
+										break;
+									default:
+										ImGui::Text("***** ELEMENT *****");
+										break;
+									}
+									Vector origin = dag->GetAbsOrigin();
+									QAngle angles = dag->GetAbsAngles();
+									if (element->GetType() == DAG_MODEL)
+									{
+										CModelElement* pEntity = (CModelElement*)dag;
+										if (pEntity != nullptr)
 										{
-											CRagdoll* ragdoll = modelDag->m_pRagdoll;
-											if (ragdoll)
+											CStudioHdr* modelPtr = pEntity->GetModelPtr();
+											if (modelPtr)
 											{
-												for (int j = 0; j < modelDag->m_pRagdoll->RagdollBoneCount(); j++)
+												if (pEntity->IsRagdoll())
 												{
-													IPhysicsObject* physObj = ragdoll->GetElement(j);
-													// use j as name for tree node
-													// special case for physics objects: use bone name
-													for (int k = 0; k < modelPtr->numbones(); k++)
+													//ImGui::SliderInt("Physics Object Index", &g_DirectorsCutSystem.boneIndex, -1, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
+													CRagdoll* ragdoll = pEntity->m_pRagdoll;
+													if (ragdoll != nullptr)
 													{
-														mstudiobone_t* bone = modelPtr->pBone(k);
-														if (bone != nullptr)
+														if (ImGui::MenuItem("Freeze All"))
 														{
-															if (bone->physicsbone == j)
+															for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
 															{
-																char name[MAXCHAR];
-																sprintf(name, "%d (%s)", j, bone->pszName());
-																// change text color to cyan when frozen
-																if(!physObj->IsMotionEnabled())
-																	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
-																if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Leaf | ((i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.boneIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
+																IPhysicsObject* bone = ragdoll->GetElement(i);
+																if (bone != nullptr)
 																{
-																	if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
-																	{
-																		g_DirectorsCutSystem.elementIndex = i;
-																		g_DirectorsCutSystem.boneIndex = j;
-																		g_DirectorsCutSystem.nextPoseIndex = -1;
-																	}
-																	if (g_DirectorsCutSystem.elementIndex == i && g_DirectorsCutSystem.boneIndex == j)
-																	{
-																		if (ImGui::BeginPopupContextItem("Physics Object"))
-																		{
-																			ImGui::Text("***** PHYSICS OBJECT *****");
-																			Vector origin = dag->GetAbsOrigin();
-																			QAngle angles = dag->GetAbsAngles();
-																			modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&origin, &angles);
-																			ImGui::Text("Origin: %f %f %f", origin.x, origin.y, origin.z);
-																			ImGui::Text("Angles: %f %f %f", angles.x, angles.y, angles.z);
-																			ImGui::EndPopup();
-																		}
-																	}
-																	// show position
-																	Vector worldVec;
-																	QAngle worldAng;
-																	physObj->GetPosition(&worldVec, &worldAng);
-																	ImGui::TreePop();
+																	PhysForceClearVelocity(bone);
+																	bone->Sleep();
+																	bone->EnableMotion(false);
+																	PhysForceClearVelocity(bone);
 																}
-																// pop color
-																if(!physObj->IsMotionEnabled())
-																	ImGui::PopStyleColor();
-																break;
+															}
+														}
+														if (ImGui::MenuItem("Unfreeze All"))
+														{
+															for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
+															{
+																IPhysicsObject* bone = ragdoll->GetElement(i);
+																if (bone != nullptr)
+																{
+																	PhysForceClearVelocity(bone);
+																	bone->EnableMotion(true);
+																	bone->Wake();
+																	PhysForceClearVelocity(bone);
+																}
 															}
 														}
 													}
 												}
-												ImGui::TreePop();
+												else if (modelinfo->GetVCollide(pEntity->GetModelIndex()) != nullptr)
+												{
+													if (ImGui::MenuItem("Make Physical"))
+													{
+														//g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
+														//g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
+														g_DirectorsCutSystem.boneIndex = 0;
+														g_DirectorsCutSystem.nextPoseIndex = -1;
+														MakeRagdoll(pEntity, g_DirectorsCutSystem.elementIndex);
+													}
+												}
 											}
 										}
 									}
-									// show pose bones
-									if (ImGui::TreeNodeEx("Pose Bones", flags))
+									// remove element
+									if (ImGui::MenuItem("Remove"))
 									{
-										for (int j = 0; j < modelPtr->numbones(); j++)
+										delete element;
+										g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
+										g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
+										g_DirectorsCutSystem.boneIndex = -1;
+										g_DirectorsCutSystem.nextPoseIndex = -1;
+										g_DirectorsCutSystem.flexIndex = -1;
+										justRemoved = true;
+									}
+									ImGui::Text("Origin: %.2f %.2f %.2f", origin.x, origin.y, origin.z);
+									ImGui::Text("Angles: %f %f %f", angles.x, angles.y, angles.z);
+									ImGui::EndPopup();
+								}
+							}
+							if (!justRemoved)
+							{
+								if (dagType == DAG_MODEL)
+								{
+									CModelElement* modelDag = (CModelElement*)elementPtr;
+									CStudioHdr* modelPtr = modelDag->GetModelPtr();
+									if (modelPtr)
+									{
+										// show physics objects (ragdolls only)
+										if (modelDag->IsRagdoll())
 										{
-											mstudiobone_t* bone = modelPtr->pBone(j);
-											if (bone != nullptr)
+											if (ImGui::TreeNodeEx("Physics Objects", flags))
 											{
-												char name[MAXCHAR];
-												sprintf(name, "%d (%s)", j, bone->pszName());
-												if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Leaf | ((i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.nextPoseIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
+												CRagdoll* ragdoll = modelDag->m_pRagdoll;
+												if (ragdoll)
+												{
+													for (int j = 0; j < modelDag->m_pRagdoll->RagdollBoneCount(); j++)
+													{
+														IPhysicsObject* physObj = ragdoll->GetElement(j);
+														// use j as name for tree node
+														// special case for physics objects: use bone name
+														for (int k = 0; k < modelPtr->numbones(); k++)
+														{
+															mstudiobone_t* bone = modelPtr->pBone(k);
+															if (bone != nullptr)
+															{
+																if (bone->physicsbone == j)
+																{
+																	char name[CHAR_MAX];
+																	sprintf(name, "%d (%s)", j, bone->pszName());
+																	// change text color to cyan when frozen
+																	if (!physObj->IsMotionEnabled())
+																		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
+																	if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Leaf | ((i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.boneIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
+																	{
+																		if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
+																		{
+																			g_DirectorsCutSystem.elementIndex = i;
+																			g_DirectorsCutSystem.boneIndex = j;
+																			g_DirectorsCutSystem.nextPoseIndex = -1;
+																			g_DirectorsCutSystem.flexIndex = -1;
+																		}
+																		if (g_DirectorsCutSystem.elementIndex == i && g_DirectorsCutSystem.boneIndex == j)
+																		{
+																			if (ImGui::BeginPopupContextItem("Physics Object"))
+																			{
+																				ImGui::Text("***** PHYSICS OBJECT *****");
+																				Vector origin = dag->GetAbsOrigin();
+																				QAngle angles = dag->GetAbsAngles();
+																				modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&origin, &angles);
+																				ImGui::Text("Origin: %.2f %.2f %.2f", origin.x, origin.y, origin.z);
+																				ImGui::Text("Angles: %f %f %f", angles.x, angles.y, angles.z);
+																				ImGui::EndPopup();
+																			}
+																		}
+																		// show position
+																		Vector worldVec;
+																		QAngle worldAng;
+																		physObj->GetPosition(&worldVec, &worldAng);
+																		ImGui::TreePop();
+																	}
+																	// pop color
+																	if (!physObj->IsMotionEnabled())
+																		ImGui::PopStyleColor();
+																	break;
+																}
+															}
+														}
+													}
+													ImGui::TreePop();
+												}
+											}
+										}
+										// show pose bones
+										if (ImGui::TreeNodeEx("Pose Bones", flags))
+										{
+											for (int j = 0; j < modelPtr->numbones(); j++)
+											{
+												mstudiobone_t* bone = modelPtr->pBone(j);
+												if (bone != nullptr)
+												{
+													char name[CHAR_MAX];
+													sprintf(name, "%d (%s)", j, bone->pszName());
+													if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Leaf | ((i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.nextPoseIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
+													{
+														if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
+														{
+															g_DirectorsCutSystem.elementIndex = i;
+															g_DirectorsCutSystem.boneIndex = -1;
+															g_DirectorsCutSystem.nextPoseIndex = j;
+															g_DirectorsCutSystem.flexIndex = -1;
+														}
+														if (g_DirectorsCutSystem.elementIndex == i && g_DirectorsCutSystem.nextPoseIndex == j)
+														{
+															if (ImGui::BeginPopupContextItem("Pose Bone"))
+															{
+																ImGui::Text("***** POSE BONE *****");
+																ImGui::Text("Origin: %.2f %.2f %.2f", g_DirectorsCutSystem.poseBoneOrigin.x, g_DirectorsCutSystem.poseBoneOrigin.y, g_DirectorsCutSystem.poseBoneOrigin.z);
+																ImGui::Text("Angles: %f %f %f", g_DirectorsCutSystem.poseBoneAngles.x, g_DirectorsCutSystem.poseBoneAngles.y, g_DirectorsCutSystem.poseBoneAngles.z);
+																ImGui::EndPopup();
+															}
+														}
+														// FIXME: can't show position in drawing code!
+														ImGui::TreePop();
+													}
+												}
+											}
+											ImGui::TreePop();
+										}
+										// show flex controllers
+										if (ImGui::TreeNodeEx("Flex Controllers", flags))
+										{
+											for (int j = 0; j < modelPtr->numflexcontrollers(); j++)
+											{
+												mstudioflexcontroller_t* pflexcontroller = modelPtr->pFlexcontroller((LocalFlexController_t)j);
+												char flexName[CHAR_MAX];
+												sprintf(flexName, "%d (%s)", j, (char*)modelDag->GetFlexControllerName((LocalFlexController_t)j));
+												if (ImGui::TreeNodeEx(flexName, flags | ImGuiTreeNodeFlags_Leaf | ((i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.flexIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
 												{
 													if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
 													{
 														g_DirectorsCutSystem.elementIndex = i;
 														g_DirectorsCutSystem.boneIndex = -1;
-														g_DirectorsCutSystem.nextPoseIndex = j;
+														g_DirectorsCutSystem.nextPoseIndex = -1;
+														g_DirectorsCutSystem.flexIndex = j;
 													}
-													if (g_DirectorsCutSystem.elementIndex == i && g_DirectorsCutSystem.nextPoseIndex == j)
+													if (g_DirectorsCutSystem.elementIndex == i && g_DirectorsCutSystem.flexIndex == j)
 													{
-														if (ImGui::BeginPopupContextItem("Pose Bone"))
+														if (ImGui::BeginPopupContextItem("Flex Controller"))
 														{
-															ImGui::Text("***** POSE BONE *****");
-															ImGui::Text("Origin: %f %f %f", g_DirectorsCutSystem.poseBoneOrigin.x, g_DirectorsCutSystem.poseBoneOrigin.y, g_DirectorsCutSystem.poseBoneOrigin.z);
-															ImGui::Text("Angles: %f %f %f", g_DirectorsCutSystem.poseBoneAngles.x, g_DirectorsCutSystem.poseBoneAngles.y, g_DirectorsCutSystem.poseBoneAngles.z);
+															ImGui::Text("***** FLEX CONTROLLER *****");
+															ImGui::Text("Weight: %.2f", modelDag->GetFlexWeight((LocalFlexController_t)j));
+															ImGui::Text("Range: %.2f min %.2f max", pflexcontroller->min, pflexcontroller->max);
 															ImGui::EndPopup();
 														}
 													}
-													// FIXME: can't show position in drawing code!
 													ImGui::TreePop();
 												}
 											}
+											ImGui::TreePop();
 										}
-										ImGui::TreePop();
 									}
 								}
 							}
+							ImGui::TreePop();
 						}
-						ImGui::TreePop();
 					}
+					ImGui::TreePop();
 				}
-				ImGui::TreePop();
 			}
 
 			// end window
 			ImGui::End();
 		}
 
-		if(justRemoved)
+		if (!justRemoved)
 		{
-			// stop everything
-		}
-		else
-		{
-			// continue
+			// continue, otherwise stop everything
 
 			// Perspective camera view
 			// Orthographic mode is not supported
@@ -503,9 +613,13 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 			if (g_DirectorsCutSystem.windowVisibilities[0])
 			{
-				ImGui::Begin("Camera", 0, ImGuiWindowFlags_AlwaysAutoResize);
+				ImGui::Begin("Editor", 0, ImGuiWindowFlags_AlwaysAutoResize);
 
 				bool taken = false;
+				bool key_q = ImGui::IsKeyPressed(ImGuiKey_Q, false);
+
+				ImGui::Text("Controls");
+				ImGui::Separator();
 
 				// Element pivot change
 				if (g_DirectorsCutSystem.elementIndex > -1)
@@ -535,8 +649,9 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 										{
 											if (g_DirectorsCutSystem.boneIndex > -1)
 											{
-												if (ImGui::Button("Selected Physics Object to Pivot (Q)") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+												if (ImGui::Button("Selected Physics Object to Pivot (Q)") || (!g_DirectorsCutSystem.gotInput && key_q))
 												{
+													g_DirectorsCutSystem.gotInput = true;
 													QAngle dummy;
 													modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&g_DirectorsCutSystem.pivot, &dummy);
 												}
@@ -545,16 +660,22 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 										}
 										if (!taken && g_DirectorsCutSystem.nextPoseIndex > -1)
 										{
-											if (ImGui::Button("Selected Pose Bone to Pivot (Q)") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+											if (ImGui::Button("Selected Pose Bone to Pivot (Q)") || (!g_DirectorsCutSystem.gotInput && key_q))
+											{
+												g_DirectorsCutSystem.gotInput = true;
 												g_DirectorsCutSystem.pivot = g_DirectorsCutSystem.poseBoneOrigin;
+											}
 											taken = true;
 										}
 									}
 								}
 								if (!taken)
 								{
-									if (ImGui::Button("Selected Element to Pivot (Q)") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+									if (ImGui::Button("Selected Element to Pivot (Q)") || (!g_DirectorsCutSystem.gotInput && key_q))
+									{
+										g_DirectorsCutSystem.gotInput = true;
 										g_DirectorsCutSystem.pivot = dag->GetAbsOrigin();
+									}
 									taken = true;
 								}
 							}
@@ -564,85 +685,35 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 
 				if (!taken)
 				{
-					if (ImGui::Button("Map Origin to Pivot (O)") || ImGui::IsKeyPressed(ImGuiKey_O, false))
+					if (ImGui::Button("Map Origin to Pivot (Q)") || (!g_DirectorsCutSystem.gotInput && key_q))
+					{
+						g_DirectorsCutSystem.gotInput = true;
 						g_DirectorsCutSystem.pivot = Vector(0, 0, 0);
+					}
 				}
 
-				// Camera adjustments
-				bool viewDirty = false;
+				if (ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 5, 1000.0f, "%.0f"))
+					viewDirty = true;
 
 				// TODO: camera dags should unlock field of view slider and hide gizmos
-				//viewDirty |= ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
+				//ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
 				//ImGui::LabelText("Field of View", "%.0f", g_DirectorsCutSystem.fov);
 
-				float oldDistance = g_DirectorsCutSystem.distance;
-				float mouseDistance = -io.MouseWheel * cvar_dx_zoom_distance.GetFloat();
-				float newDistance = g_DirectorsCutSystem.distance + mouseDistance;
+				if(ImGui::InputFloat3("Snap", g_DirectorsCutSystem.snap))
+					g_DirectorsCutSystem.gotInput = true;
+				ImGui::SameLine();
+				ImGui::Checkbox("", &g_DirectorsCutSystem.useSnap);
 
-				if (newDistance >= 5.f && newDistance <= 1000.f)
-					g_DirectorsCutSystem.distance = newDistance;
-				else if (newDistance < 5.f)
-					g_DirectorsCutSystem.distance = 5.f;
-				else if (newDistance > 1000.f)
-					g_DirectorsCutSystem.distance = 1000.f;
-
-				if (oldDistance != g_DirectorsCutSystem.distance)
-					viewDirty = true;
-
-				viewDirty |= ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 5, 1000.0f, "%.0f");
-
-				// Camera movement
-				if (ImGui::IsMouseDown(2))
-				{
-					float sensitivity;
-					Vector2D mouseDelta = Vector2D(io.MouseDelta.x, io.MouseDelta.y);
-
-					// Middle click orbit
-					sensitivity = cvar_dx_orbit_sensitivity.GetFloat();
-					g_DirectorsCutSystem.camYAngle += mouseDelta.x * sensitivity;
-					g_DirectorsCutSystem.camXAngle += mouseDelta.y * sensitivity;
-
-					viewDirty = true;
-				}
-
-				// Reset camera view to accommodate new distance
-				if (viewDirty || firstFrame)
-				{
-					float eye[3];
-					eye[0] = cosf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
-					eye[1] = sinf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
-					eye[2] = sinf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
-					float at[] = { 0.f, 0.f, 0.f };
-					float up[] = { 0.f, 1.f, 0.f };
-					g_DirectorsCutSystem.LookAt(eye, at, up, g_DirectorsCutSystem.cameraView);
-					firstFrame = false;
-				}
-
-				// Grid
-				/*
-				ImGui::Checkbox("Draw Grid", &g_DirectorsCutSystem.drawGrid);
-				if (g_DirectorsCutSystem.drawGrid)
-				{
-					ImGui::InputFloat("Grid Size", &g_DirectorsCutSystem.gridSize);
-				}
-				*/
-
-				ImGui::SliderFloat("Time Scale", &g_DirectorsCutSystem.timeScale, 0.01f, 1.f, "%.2f");
-
-				// Snapping
-				ImGui::Checkbox("Use Snapping", &g_DirectorsCutSystem.useSnap);
-				if (g_DirectorsCutSystem.useSnap)
-					gotInput |= ImGui::InputFloat3("Snap", g_DirectorsCutSystem.snap);
+				ImGui::Text("Transform Mode");
+				ImGui::Separator();
 
 				// Operation (gizmo mode)
 				if (ImGui::RadioButton("None", g_DirectorsCutSystem.operation < 0))
 					g_DirectorsCutSystem.operation = -1;
-				ImGui::SameLine();
 				if (ImGui::RadioButton("Translate", g_DirectorsCutSystem.operation == 0))
 					g_DirectorsCutSystem.operation = 0;
 				if (ImGui::RadioButton("Rotate", g_DirectorsCutSystem.operation == 1))
 					g_DirectorsCutSystem.operation = 1;
-				ImGui::SameLine();
 				if (ImGui::RadioButton("Universal", g_DirectorsCutSystem.operation == 2))
 					g_DirectorsCutSystem.operation = 2;
 
@@ -658,118 +729,37 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 					mCurrentGizmoOperation = ImGuizmo::TRANSLATE | ImGuizmo::ROTATE;
 				}
 
+				ImGui::Text("Movement Space");
+				ImGui::Separator();
+
 				// Global space toggles
-				if (ImGui::RadioButton("Local", mCurrentGizmoMode == ImGuizmo::LOCAL))
-					mCurrentGizmoMode = ImGuizmo::LOCAL;
-				ImGui::SameLine();
 				if (ImGui::RadioButton("World", mCurrentGizmoMode == ImGuizmo::WORLD))
 					mCurrentGizmoMode = ImGuizmo::WORLD;
 				ImGui::SameLine();
+				if (ImGui::RadioButton("Local", mCurrentGizmoMode == ImGuizmo::LOCAL))
+					mCurrentGizmoMode = ImGuizmo::LOCAL;
 
-				if (ImGui::IsKeyPressed(ImGuiKey_L, false))
+				if (g_DirectorsCutSystem.elementIndex > -1)
 				{
-					if (mCurrentGizmoMode == ImGuizmo::LOCAL)
-						mCurrentGizmoMode = ImGuizmo::WORLD;
-					else
-						mCurrentGizmoMode = ImGuizmo::LOCAL;
-				}
-
-				ImGui::End();
-			}
-
-			if (g_DirectorsCutSystem.levelInit && g_DirectorsCutSystem.windowVisibilities[1])
-			{
-				if (g_DirectorsCutSystem.elementIndex < 0)
-				{
-					if (g_DirectorsCutSystem.operation >= 0)
+					CElementPointer* element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
+					if (element != nullptr)
 					{
-						float modelMatrixPivot[16];
-						Vector posPivot = g_DirectorsCutSystem.newPivot;
-						QAngle angPivot = QAngle();
-						float sPivot = 1.f;
-						static float translationPivot[3], rotationPivot[3], scalePivot[3];
-
-						// pivot mode
-						ImGuizmo::SetID(-1);
-
-						// Add offset (pivot) to translation
-						posPivot -= g_DirectorsCutSystem.pivot;
-
-						// Y up to Z up - pos is Z up, translation is Y up
-						translationPivot[0] = -posPivot.y;
-						translationPivot[1] = posPivot.z;
-						translationPivot[2] = -posPivot.x;
-
-						rotationPivot[0] = -angPivot.x;
-						rotationPivot[1] = angPivot.y;
-						rotationPivot[2] = -angPivot.z;
-
-						scalePivot[0] = sPivot;
-						scalePivot[1] = sPivot;
-						scalePivot[2] = sPivot;
-
-						ImGuizmo::RecomposeMatrixFromComponents(translationPivot, rotationPivot, scalePivot, modelMatrixPivot);
-						float deltaMatrix[16];
-						float deltaTranslation[3], deltaRotation[3], deltaScale[3];
-						ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode, modelMatrixPivot, deltaMatrix, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
-						ImGuizmo::DecomposeMatrixToComponents(deltaMatrix, deltaTranslation, deltaRotation, deltaScale);
-						// Revert Z up
-						float translation2[3];
-						translation2[0] = -deltaTranslation[2];
-						translation2[1] = -deltaTranslation[0];
-						translation2[2] = deltaTranslation[1];
-						float rotation2[3];
-						rotation2[0] = -deltaRotation[0];
-						rotation2[1] = deltaRotation[1];
-						rotation2[2] = -deltaRotation[2];
-						if (ImGuizmo::IsUsing())
+						ImGui::Text("Selection");
+						ImGui::Separator();
+						if (g_DirectorsCutSystem.elements.Count() > 0)
 						{
-							// Create source vars from new values
-							Vector newPos = Vector(0, 0, 0);
-							QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
-							if (newAng.x == 0.f && newAng.y == 0.f && newAng.z == 0.f && newAng.x == -0.f && newAng.y == -0.f && newAng.z == -0.f)
-								newPos = Vector(translation2[0], translation2[1], translation2[2]);
-							g_DirectorsCutSystem.newPivot += newPos;
-							g_DirectorsCutSystem.justSetPivot = true;
+							// failsafe
+							if (g_DirectorsCutSystem.elementIndex < 0)
+								g_DirectorsCutSystem.elementIndex = 0;
 
-						}
-						else if (g_DirectorsCutSystem.justSetPivot)
-						{
-							g_DirectorsCutSystem.pivot = g_DirectorsCutSystem.newPivot;
-							g_DirectorsCutSystem.justSetPivot = false;
-						}
-						else
-						{
-							g_DirectorsCutSystem.newPivot = g_DirectorsCutSystem.pivot;
-						}
-					}
-				}
-				else
-				{
-					ImGui::Begin("Element", 0, ImGuiWindowFlags_AlwaysAutoResize);
+							ImGui::LabelText("Element Index", "%d", g_DirectorsCutSystem.elementIndex);
 
-					if (g_DirectorsCutSystem.elements.Count() > 0)
-					{
-						// failsafe
-						if (g_DirectorsCutSystem.elementIndex < 0)
-							g_DirectorsCutSystem.elementIndex = 0;
+							char* name = element->name;
+							if(ImGui::InputText("Element Name", name, CHAR_MAX))
+								g_DirectorsCutSystem.gotInput = true;
+							if (strcmp(name, element->name) != 0)
+								strcpy(element->name, name);
 
-						ImGui::LabelText("Element Index", "%d", g_DirectorsCutSystem.elementIndex);
-
-						/*
-						if (g_DirectorsCutSystem.elements.Count() > 1)
-						{
-							if (ImGui::SliderInt("Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.elements.Count() - 1))
-							{
-								g_DirectorsCutSystem.boneIndex = -1;
-								g_DirectorsCutSystem.nextPoseIndex = -1;
-								g_DirectorsCutSystem.flexIndex = -1;
-							}
-						}
-						*/
-						CElementPointer* element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
-						if (element != nullptr)
-						{
 							switch (element->GetType())
 							{
 							case DAG_MODEL:
@@ -787,39 +777,42 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 											{
 												if (i == g_DirectorsCutSystem.nextPoseIndex)
 												{
-													ImGui::LabelText("Pose Bone Index", "%d", g_DirectorsCutSystem.nextPoseIndex);
+													ImGui::SliderInt("Pose Bone Index", &g_DirectorsCutSystem.nextPoseIndex, 0, modelPtr->numbones() - 1);
 													char* boneName = bone->pszName();
 													ImGui::LabelText("Pose Bone Name", "%s", boneName);
 													break;
 												}
 												else if (bone->physicsbone == g_DirectorsCutSystem.boneIndex)
 												{
-													ImGui::LabelText("Physics Object Index", "%d", g_DirectorsCutSystem.boneIndex);
+													ImGui::SliderInt("Physics Object Index", &g_DirectorsCutSystem.boneIndex, 0, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
 													char* boneName = bone->pszName();
 													ImGui::LabelText("Physics Object Name", "%s", boneName);
 													break;
 												}
 											}
 										}
-										//ImGui::SliderInt("Pose Bone Index", &g_DirectorsCutSystem.nextPoseIndex, -1, modelPtr->numbones() - 1);
-										ImGui::SliderInt("Flex Index", &g_DirectorsCutSystem.flexIndex, -1, modelPtr->numflexcontrollers() - 1);
-										for (int i = 0; i < (int)modelPtr->numflexcontrollers(); i++)
+										if (g_DirectorsCutSystem.flexIndex >= 0)
 										{
-											if (i == g_DirectorsCutSystem.flexIndex)
+											ImGui::SliderInt("Flex Index", &g_DirectorsCutSystem.flexIndex, 0, modelPtr->numflexcontrollers() - 1);
+											for (int i = 0; i < (int)modelPtr->numflexcontrollers(); i++)
 											{
-												mstudioflexcontroller_t* pflexcontroller = modelPtr->pFlexcontroller((LocalFlexController_t)i);
-												char* flexName = (char*)pEntity->GetFlexControllerName((LocalFlexController_t)i);
-												if (pflexcontroller->max != pflexcontroller->min)
+												if (i == g_DirectorsCutSystem.flexIndex)
 												{
+													mstudioflexcontroller_t* pflexcontroller = modelPtr->pFlexcontroller((LocalFlexController_t)i);
+													char* flexName = (char*)pEntity->GetFlexControllerName((LocalFlexController_t)i);
+													ImGui::LabelText("Flex Name", "%s", flexName);
 													float flex = pEntity->GetFlexWeight((LocalFlexController_t)i);
-													ImGui::SliderFloat(flexName, &flex, pflexcontroller->min, pflexcontroller->max);
-													pEntity->SetFlexWeight((LocalFlexController_t)i, flex);
+													if (pflexcontroller->max != pflexcontroller->min)
+													{
+														ImGui::SliderFloat("Flex Weight", &flex, pflexcontroller->min, pflexcontroller->max);
+														pEntity->SetFlexWeight((LocalFlexController_t)i, flex);
+													}
+													else
+													{
+														ImGui::LabelText("Flex Weight", "%d", flex);
+													}
+													break;
 												}
-												else
-												{
-													ImGui::LabelText("Flex", "%s", flexName);
-												}
-												break;
 											}
 										}
 										/*
@@ -830,7 +823,6 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 										*/
 										if (pEntity->IsRagdoll() && g_DirectorsCutSystem.boneIndex >= 0)
 										{
-											//ImGui::SliderInt("Physics Object Index", &g_DirectorsCutSystem.boneIndex, -1, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
 											CRagdoll* ragdoll = pEntity->m_pRagdoll;
 											if (ragdoll != nullptr)
 											{
@@ -840,23 +832,22 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 													// F key also freezes
 													if (!bone->IsMotionEnabled())
 													{
-														if (ImGui::Button("Unfreeze Physics Object (F)") || ImGui::IsKeyPressed(ImGuiKey_F, false))
+														if (ImGui::Button("Unfreeze Physics Object (F)") || (!g_DirectorsCutSystem.gotInput && ImGui::IsKeyPressed(ImGuiKey_F, false)))
 														{
+															g_DirectorsCutSystem.gotInput = true;
 															PhysForceClearVelocity(bone);
 															bone->EnableMotion(true);
 															bone->Wake();
 															PhysForceClearVelocity(bone);
 														}
 													}
-													else
+													else if (ImGui::Button("Freeze Physics Object (F)") || (!g_DirectorsCutSystem.gotInput && ImGui::IsKeyPressed(ImGuiKey_F, false)))
 													{
-														if (ImGui::Button("Freeze Physics Object (F)") || ImGui::IsKeyPressed(ImGuiKey_F, false))
-														{
-															PhysForceClearVelocity(bone);
-															bone->Sleep();
-															bone->EnableMotion(false);
-															PhysForceClearVelocity(bone);
-														}
+														g_DirectorsCutSystem.gotInput = true;
+														PhysForceClearVelocity(bone);
+														bone->Sleep();
+														bone->EnableMotion(false);
+														PhysForceClearVelocity(bone);
 													}
 												}
 											}
@@ -866,99 +857,13 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 								break;
 							}
 						}
-						if (g_DirectorsCutSystem.elementIndex > -1 && g_DirectorsCutSystem.operation >= 0)
-						{
-							if (element != nullptr)
-							{
-								C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
-								if (pEntity != nullptr)
-								{
-									ImGuizmo::SetID(g_DirectorsCutSystem.elementIndex);
-
-									float modelMatrix[16];
-									Vector pos = pEntity->GetAbsOrigin();
-									QAngle ang = pEntity->GetAbsAngles();
-									float s = 1.f;
-
-									if (element->GetType() == DAG_MODEL)
-									{
-										CModelElement* modelDag = (CModelElement*)element->GetPointer();
-										if (modelDag != nullptr)
-										{
-											if (modelDag->IsRagdoll() && g_DirectorsCutSystem.boneIndex >= 0)
-											{
-												modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&pos, &ang);
-											}
-											else if (g_DirectorsCutSystem.nextPoseIndex >= 0)
-											{
-												pos = g_DirectorsCutSystem.poseBoneOrigin;
-												ang = g_DirectorsCutSystem.poseBoneAngles;
-											}
-										}
-									}
-
-									static float translation[3], rotation[3], scale[3];
-
-									// Add offset (pivot) to translation
-									pos -= g_DirectorsCutSystem.pivot;
-
-									// Y up to Z up - pos is Z up, translation is Y up
-									translation[0] = -pos.y;
-									translation[1] = pos.z;
-									translation[2] = -pos.x;
-
-									rotation[0] = -ang.x;
-									rotation[1] = ang.y;
-									rotation[2] = -ang.z;
-
-									scale[0] = s;
-									scale[1] = s;
-									scale[2] = s;
-
-									ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, modelMatrix);
-									float deltaMatrix[16];
-									float deltaTranslation[3], deltaRotation[3], deltaScale[3];
-									ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode, modelMatrix, deltaMatrix, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
-									ImGuizmo::DecomposeMatrixToComponents(deltaMatrix, deltaTranslation, deltaRotation, deltaScale);
-									// Revert Z up
-									float translation2[3];
-									translation2[0] = -deltaTranslation[2];
-									translation2[1] = -deltaTranslation[0];
-									translation2[2] = deltaTranslation[1];
-									float rotation2[3];
-									rotation2[0] = -deltaRotation[0];
-									rotation2[1] = deltaRotation[1];
-									rotation2[2] = -deltaRotation[2];
-									if (ImGuizmo::IsUsing())
-									{
-										ImGui::LabelText("Delta Translation", "%f %f %f", deltaTranslation[0], deltaTranslation[1], deltaTranslation[2]);
-										ImGui::LabelText("Delta Rotation", "%f %f %f", deltaRotation[0], deltaRotation[1], deltaRotation[2]);
-										// Create source vars from new values
-										Vector newPos = Vector(0, 0, 0);
-										QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
-										if (newAng.x == 0.f && newAng.y == 0.f && newAng.z == 0.f && newAng.x == -0.f && newAng.y == -0.f && newAng.z == -0.f)
-											newPos = Vector(translation2[0], translation2[1], translation2[2]);
-										g_DirectorsCutSystem.deltaOrigin = newPos;
-										g_DirectorsCutSystem.deltaAngles = newAng;
-									}
-									else
-									{
-										g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
-										g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
-									}
-								}
-							}
-						}
 					}
-					ImGui::End();
 				}
+				ImGui::End();
 			}
 
 			ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
 			ImGuizmo::SetRect(0, 0, windowWidth, windowHeight);
-
-			//if (g_DirectorsCutSystem.drawGrid)
-				//ImGuizmo::DrawGrid(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, g_DirectorsCutSystem.identityMatrix, g_DirectorsCutSystem.gridSize);
 
 			// Obsolete due to middle mouse orbiting
 			//ImGuizmo::ViewManipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.distance, ImVec2(windowWidth - 192, 0), ImVec2(192, 192), 0x10101010);
@@ -973,8 +878,323 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 			ImGui::Text("Author: %s", "KiwifruitDev");
 			ImGui::Text("License: %s", "MIT");
 			ImGui::Text("https://twitter.com/SFMDirectorsCut");
+
+			ImGui::End();
+
+			// local space toggle
+			if (!g_DirectorsCutSystem.gotInput && ImGui::IsKeyPressed(ImGuiKey_L, false))
+			{
+				g_DirectorsCutSystem.gotInput = true;
+				if (mCurrentGizmoMode == ImGuizmo::LOCAL)
+					mCurrentGizmoMode = ImGuizmo::WORLD;
+				else
+					mCurrentGizmoMode = ImGuizmo::LOCAL;
+			}
+
+			// camera movement controls
+
+			if (!mouseWheelTaken)
+			{
+				float oldDistance = g_DirectorsCutSystem.distance;
+				float mouseDistance = -io.MouseWheel * cvar_dx_zoom_distance.GetFloat();
+				float newDistance = g_DirectorsCutSystem.distance + mouseDistance;
+
+				if (newDistance >= 5.f && newDistance <= 1000.f)
+					g_DirectorsCutSystem.distance = newDistance;
+				else if (newDistance < 5.f)
+					g_DirectorsCutSystem.distance = 5.f;
+				else if (newDistance > 1000.f)
+					g_DirectorsCutSystem.distance = 1000.f;
+
+				if (oldDistance != g_DirectorsCutSystem.distance)
+					viewDirty = true;
+			}
+
+			// Camera movement
+			if (ImGui::IsMouseDown(2))
+			{
+				float sensitivity;
+				Vector2D mouseDelta = Vector2D(io.MouseDelta.x, io.MouseDelta.y);
+
+				// Middle click orbit
+				sensitivity = cvar_dx_orbit_sensitivity.GetFloat();
+				g_DirectorsCutSystem.camYAngle += mouseDelta.x * sensitivity;
+				g_DirectorsCutSystem.camXAngle += mouseDelta.y * sensitivity;
+
+				viewDirty = true;
+			}
+
+			// Reset camera view to accommodate new distance
+			if (viewDirty || firstFrame)
+			{
+				float eye[3];
+				eye[0] = cosf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
+				eye[1] = sinf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
+				eye[2] = sinf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
+				float at[] = { 0.f, 0.f, 0.f };
+				float up[] = { 0.f, 1.f, 0.f };
+				g_DirectorsCutSystem.LookAt(eye, at, up, g_DirectorsCutSystem.cameraView);
+				firstFrame = false;
+			}
+
+			// Gizmos
+			if (g_DirectorsCutSystem.operation >= 0)
+			{
+				if (g_DirectorsCutSystem.elementIndex < 0)
+				{
+					// TODO: don't repeat this code
+					float modelMatrixPivot[16];
+					Vector posPivot = g_DirectorsCutSystem.newPivot;
+					QAngle angPivot = QAngle();
+					float sPivot = 1.f;
+					static float translationPivot[3], rotationPivot[3], scalePivot[3];
+
+					// pivot mode
+					ImGuizmo::SetID(-1);
+
+					// Add offset (pivot) to translation
+					posPivot -= g_DirectorsCutSystem.pivot;
+
+					// Y up to Z up - pos is Z up, translation is Y up
+					translationPivot[0] = -posPivot.y;
+					translationPivot[1] = posPivot.z;
+					translationPivot[2] = -posPivot.x;
+
+					rotationPivot[0] = -angPivot.x;
+					rotationPivot[1] = angPivot.y;
+					rotationPivot[2] = -angPivot.z;
+
+					scalePivot[0] = sPivot;
+					scalePivot[1] = sPivot;
+					scalePivot[2] = sPivot;
+
+					ImGuizmo::RecomposeMatrixFromComponents(translationPivot, rotationPivot, scalePivot, modelMatrixPivot);
+					float deltaMatrix[16];
+					float deltaTranslation[3], deltaRotation[3], deltaScale[3];
+					ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode, modelMatrixPivot, deltaMatrix, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
+					ImGuizmo::DecomposeMatrixToComponents(deltaMatrix, deltaTranslation, deltaRotation, deltaScale);
+					// Revert Z up
+					float translation2[3];
+					translation2[0] = -deltaTranslation[2];
+					translation2[1] = -deltaTranslation[0];
+					translation2[2] = deltaTranslation[1];
+					float rotation2[3];
+					rotation2[0] = -deltaRotation[0];
+					rotation2[1] = deltaRotation[1];
+					rotation2[2] = -deltaRotation[2];
+					if (ImGuizmo::IsUsing())
+					{
+						// Create source vars from new values
+						Vector newPos = Vector(0, 0, 0);
+						QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
+						if (newAng.x == 0.f && newAng.y == 0.f && newAng.z == 0.f && newAng.x == -0.f && newAng.y == -0.f && newAng.z == -0.f)
+							newPos = Vector(translation2[0], translation2[1], translation2[2]);
+						g_DirectorsCutSystem.newPivot += newPos;
+						g_DirectorsCutSystem.justSetPivot = true;
+
+					}
+					else if (g_DirectorsCutSystem.justSetPivot)
+					{
+						g_DirectorsCutSystem.pivot = g_DirectorsCutSystem.newPivot;
+						g_DirectorsCutSystem.justSetPivot = false;
+					}
+					else
+					{
+						g_DirectorsCutSystem.newPivot = g_DirectorsCutSystem.pivot;
+					}
+				}
+				else if (g_DirectorsCutSystem.elementIndex > -1)
+				{
+					CElementPointer* element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
+					if (element != nullptr)
+					{
+						C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
+						if (pEntity != nullptr)
+						{
+							// TODO: don't repeat this code
+
+							ImGuizmo::SetID(g_DirectorsCutSystem.elementIndex);
+
+							float modelMatrix[16];
+							Vector pos = pEntity->GetAbsOrigin();
+							QAngle ang = pEntity->GetAbsAngles();
+							float s = 1.f;
+
+							if (element->GetType() == DAG_MODEL)
+							{
+								CModelElement* modelDag = (CModelElement*)element->GetPointer();
+								if (modelDag != nullptr)
+								{
+									if (modelDag->IsRagdoll() && g_DirectorsCutSystem.boneIndex >= 0)
+									{
+										modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&pos, &ang);
+									}
+									else if (g_DirectorsCutSystem.nextPoseIndex >= 0)
+									{
+										pos = g_DirectorsCutSystem.poseBoneOrigin;
+										ang = g_DirectorsCutSystem.poseBoneAngles;
+									}
+								}
+							}
+
+							static float translation[3], rotation[3], scale[3];
+
+							// Add offset (pivot) to translation
+							pos -= g_DirectorsCutSystem.pivot;
+
+							// Y up to Z up - pos is Z up, translation is Y up
+							translation[0] = -pos.y;
+							translation[1] = pos.z;
+							translation[2] = -pos.x;
+
+							rotation[0] = -ang.x;
+							rotation[1] = ang.y;
+							rotation[2] = -ang.z;
+
+							scale[0] = s;
+							scale[1] = s;
+							scale[2] = s;
+
+							ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale, modelMatrix);
+							float deltaMatrix[16];
+							float deltaTranslation[3], deltaRotation[3], deltaScale[3];
+							ImGuizmo::Manipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode, modelMatrix, deltaMatrix, (g_DirectorsCutSystem.useSnap ? g_DirectorsCutSystem.snap : NULL), NULL, NULL);
+							ImGuizmo::DecomposeMatrixToComponents(deltaMatrix, deltaTranslation, deltaRotation, deltaScale);
+							// Revert Z up
+							float translation2[3];
+							translation2[0] = -deltaTranslation[2];
+							translation2[1] = -deltaTranslation[0];
+							translation2[2] = deltaTranslation[1];
+							float rotation2[3];
+							rotation2[0] = -deltaRotation[0];
+							rotation2[1] = deltaRotation[1];
+							rotation2[2] = -deltaRotation[2];
+							if (ImGuizmo::IsUsing())
+							{
+								// Create source vars from new values
+								Vector newPos = Vector(0, 0, 0);
+								QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
+								if (newAng.x == 0.f && newAng.y == 0.f && newAng.z == 0.f && newAng.x == -0.f && newAng.y == -0.f && newAng.z == -0.f)
+									newPos = Vector(translation2[0], translation2[1], translation2[2]);
+								g_DirectorsCutSystem.deltaOrigin = newPos;
+								g_DirectorsCutSystem.deltaAngles = newAng;
+							}
+							else
+							{
+								g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
+								g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
+							}
+						}
+					}
+				}
+			}
+
+			// ctrl+click
+			if (!g_DirectorsCutSystem.gotInput && g_DirectorsCutSystem.selecting && g_DirectorsCutSystem.hoveringInfo[0] >= 0)
+			{
+				// draw a "hint" text box at the mouse cursor
+				ImGui::SetNextWindowPos(ImVec2(io.MousePos.x + 8, io.MousePos.y + 8));
+				ImGui::Begin("Hint", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_AlwaysAutoResize);
+
+				for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
+				{
+					CElementPointer* element = g_DirectorsCutSystem.elements[i];
+					if (element != nullptr)
+					{
+						if (i == g_DirectorsCutSystem.hoveringInfo[0])
+						{
+							char modelNameAndIndex[CHAR_MAX];
+							sprintf(modelNameAndIndex, "%d", i);
+
+							if (element->name != nullptr && element->name[0] != '\0')
+							{
+								sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, element->name);
+							}
+							
+							DAG_ type = element->GetType();
+							void* pointer = element->GetPointer();
+
+							switch (type)
+							{
+							case DAG_MODEL:
+							{
+								CModelElement* model = (CModelElement*)pointer;
+								if (model != nullptr)
+									sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, model->GetModelName());
+								break;
+							}
+							case DAG_LIGHT:
+								sprintf(modelNameAndIndex, "%s (Light)", modelNameAndIndex);
+								break;
+							case DAG_CAMERA:
+								sprintf(modelNameAndIndex, "%s (Camera)", modelNameAndIndex);
+								break;
+							case DAG_NONE:
+								sprintf(modelNameAndIndex, "%s (Generic)", modelNameAndIndex);
+								break;
+							}
+							ImGui::Text(modelNameAndIndex);
+							if(type == DAG_MODEL && (g_DirectorsCutSystem.hoveringInfo[1] >= 0 || g_DirectorsCutSystem.hoveringInfo[2] >= 0))
+							{
+								CModelElement* modelDag = (CModelElement*)pointer;
+								if (modelDag != nullptr)
+								{
+									CStudioHdr* modelPtr = modelDag->GetModelPtr();
+									if (modelPtr != nullptr)
+									{
+										for(int k = 0; k < modelPtr->numbones(); k++)
+										{
+											mstudiobone_t* bone = modelPtr->pBone(k);
+											if (bone != nullptr)
+											{
+												char boneName[CHAR_MAX];
+												sprintf(boneName, "%d (%s)", k, bone->pszName());
+												
+												if (k == g_DirectorsCutSystem.hoveringInfo[2])
+												{
+													ImGui::Separator();
+													ImGui::Text(boneName);
+													break;
+												}
+												
+												if (modelDag->IsRagdoll())
+												{
+													CRagdoll* ragdoll = modelDag->m_pRagdoll;
+													if (ragdoll != nullptr)
+													{
+														for(int j = 0; j < ragdoll->RagdollBoneCount(); j++)
+														{
+															if(j == g_DirectorsCutSystem.hoveringInfo[1])
+															{
+																IPhysicsObject* physbone = ragdoll->GetElement(j);
+																if (physbone != nullptr)
+																{
+																	if(bone->physicsbone == k)
+																	{
+																		ImGui::Separator();
+																		ImGui::Text(boneName);
+																		break;
+																	}
+																	break;
+																}
+															}
+														}
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+							break;
+						}
+					}
+				}
+
+				ImGui::End();
+			}
+
 		}
-		ImGui::End();
 		ImGui::EndFrame();
 		ImGui::Render();
 		ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
@@ -986,10 +1206,10 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 LRESULT WINAPI WndProc(const HWND hWnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
 {
-	if (cvar_imgui_enabled.GetBool() && cvar_imgui_input_enabled.GetBool() && !engine->IsPaused())
-	{
+	// This hook redirects input to ImGui
+	if (cvar_imgui_enabled.GetBool() && cvar_imgui_input_enabled.GetBool() && !engine->IsPaused() && g_DirectorsCutSystem.levelInit)
 		ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
-	}
+	// TODO: Should we return here if ImGui capture input or?
 	return CallWindowProc(ogWndProc, hWnd, msg, wParam, lParam);
 }
 
@@ -1040,10 +1260,13 @@ void CDirectorsCutSystem::SetupEngineView(Vector& origin, QAngle& angles, float&
 
 void CDirectorsCutSystem::PostInit()
 {
-	bool newWindowVisibilities[3] = {
-		true, true, true
+	// set default values
+	sprintf(modelName, "models/alyx.mdl");
+	sprintf(lightTexture, "effects/flashlight001");
+	bool newWindowVisibilities[2] = {
+		true, true
 	};
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < 2; i++)
 	{
 		windowVisibilities[i] = newWindowVisibilities[i];
 	}
@@ -1069,6 +1292,11 @@ void CDirectorsCutSystem::PostInit()
 	for (int i = 0; i < 3; i++)
 	{
 		snap[i] = newSnap[i];
+	}
+	int newHoveringInfo[3] = { -1, -1, -1 };
+	for (int i = 0; i < 3; i++)
+	{
+		hoveringInfo[i] = newHoveringInfo[i];
 	}
 	// Hook Direct3D in hl2.exe
 	Msg("Director's Cut: Hooking Direct3D...\n");
@@ -1155,7 +1383,7 @@ void CDirectorsCutSystem::LevelShutdownPreEntity()
 {
 	levelInit = false;
 	// loop g_DirectorsCutSystem.dags to remove all entities
-	for (int i = 0; i < g_DirectorsCutSystem.elements.Count() - 1; i++)
+	for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
 	{
 		delete g_DirectorsCutSystem.elements[i];
 	}
@@ -1165,7 +1393,7 @@ void CDirectorsCutSystem::LevelShutdownPreEntity()
 
 void CDirectorsCutSystem::Update(float frametime)
 {
-	bool newState = (cvar_imgui_enabled.GetBool() && cvar_imgui_input_enabled.GetBool() && !engine->IsPaused());
+	bool newState = (cvar_imgui_enabled.GetBool() && cvar_imgui_input_enabled.GetBool() && !engine->IsPaused() && g_DirectorsCutSystem.levelInit);
 	if (cursorState != newState)
 	{
 		cursorState = newState;
@@ -1185,384 +1413,419 @@ void CDirectorsCutSystem::Update(float frametime)
 			vgui::surface()->SurfaceSetCursorPos(x, y);
 		}
 	}
-	C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
-	if (pPlayer != nullptr)
+	// only perform DX updates when appropriate
+	if(newState)
 	{
-		clienttools->GetLocalPlayerEyePosition(playerOrigin, playerAngles, playerFov);
-	}
-	if (timeScale != currentTimeScale)
-	{
-		ConVar* varTimeScale = cvar->FindVar("host_timescale");
-		varTimeScale->SetValue(timeScale);
-		currentTimeScale = timeScale;
-	}
-	Vector newPos = deltaOrigin;
-	QAngle newAng = deltaAngles;
-	if (elementIndex > -1)
-	{
-		if (elementIndex < elements.Count())
+		C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
+		if (pPlayer != nullptr)
 		{
-			CElementPointer* element = elements[elementIndex];
-			if (element != nullptr)
-			{
-				C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
-				if (pEntity != nullptr)
-				{
-					bool shouldMoveGeneric = true;
-					if (element->GetType() == DAG_MODEL)
-					{
-						CModelElement* modelDag = (CModelElement*)element->GetPointer();
-						if (modelDag != nullptr)
-						{
-							if (modelDag->IsRagdoll() && boneIndex >= 0)
-							{
-								shouldMoveGeneric = false;
-								if (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f)
-								{
-									IPhysicsObject* bone = modelDag->m_pRagdoll->GetElement(boneIndex);
-									if (bone != nullptr)
-									{
-										PhysForceClearVelocity(bone);
-										bone->Wake();
-										// apply delta to bone
-										Vector origin;
-										QAngle angles;
-										bone->GetPosition(&origin, &angles);
-										angles += deltaAngles;
-										origin += deltaOrigin;
-										bone->SetPosition(origin, angles, true);
-									}
-								}
-							}
-							else if (nextPoseIndex >= 0)
-							{
-								shouldMoveGeneric = false;
-								int nextPoseIndexTrue = nextPoseIndex;
-								// pretend that the bone is in world space (it isn't)
-								modelDag->PushAllowBoneAccess(true, true, "DirectorsCut");
-								Vector worldVec;
-								QAngle worldAng;
-								MatrixAngles(modelDag->GetBoneForWrite(nextPoseIndexTrue), worldAng, worldVec);
-								poseBoneOrigin = worldVec + modelDag->posadds[nextPoseIndexTrue];
-								poseBoneAngles = worldAng + modelDag->anglehelper[nextPoseIndexTrue];
-								if (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f)
-								{
-									// apply delta to pose
-									poseBoneAngles += deltaAngles;
-									poseBoneOrigin += deltaOrigin;
-									// remove world space for final pose
-									Vector localVec = poseBoneOrigin - worldVec;
-									QAngle localAng = poseBoneAngles - worldAng;
-									modelDag->PoseBones(nextPoseIndexTrue, localVec, localAng);
-								}
-								modelDag->PopBoneAccess("DirectorsCut");
-							}
-						}
-					}
-					if(shouldMoveGeneric && (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f))
-					{
-						// apply delta to entity
-						Vector origin = pEntity->GetAbsOrigin();
-						QAngle angles = pEntity->GetAbsAngles();
-						angles += deltaAngles;
-						origin += deltaOrigin;
-						pEntity->SetAbsOrigin(origin);
-						pEntity->SetAbsAngles(angles);
-					}
-				}
-			}
+			clienttools->GetLocalPlayerEyePosition(playerOrigin, playerAngles, playerFov);
 		}
-	}
-
-	if (levelInit && cvar_imgui_enabled.GetBool() && cvar_imgui_input_enabled.GetBool() && !engine->IsPaused())
-	{
-		if (selecting)
+		if (timeScale != currentTimeScale)
 		{
-			if (operation != -2)
+			ConVar* varTimeScale = cvar->FindVar("host_timescale");
+			varTimeScale->SetValue(timeScale);
+			currentTimeScale = timeScale;
+		}
+		Vector newPos = deltaOrigin;
+		QAngle newAng = deltaAngles;
+		if (elementIndex > -1)
+		{
+			if (elementIndex < elements.Count())
 			{
-				oldOperation = operation;
-				operation = -2;
-			}
-			// holding down CTRL (selecting) should allow the user to select individual objects
-			float vector = 0.25f;
-			Vector boundMin = Vector(-vector, -vector, -vector);
-			Vector boundMax = Vector(vector, vector, vector);
-			int colorR = 196;
-			int colorG = 107;
-			int colorB = 174;
-			int colorA = 255;
-			int colorR_hover = 255;
-			int colorG_hover = 255;
-			int colorB_hover = 255;
-			int colorA_hover = 255;
-			int colorR_selected = 0;
-			int colorG_selected = 255;
-			int colorB_selected = 255;
-			int colorA_selected = 255;
-			int mouseX, mouseY;
-			input->GetFullscreenMousePos(&mouseX, &mouseY);
-			if (elementIndex <= -1)
-				return;
-			int modelsPhysOrBones = 0;
-			if (boneIndex >= 0)
-				modelsPhysOrBones = 1;
-			else if (nextPoseIndex >= 0)
-				modelsPhysOrBones = 2;
-			bool clicked = ImGui::IsMouseClicked(0);
-			// loop all models
-			for (int i = 0; i < elements.Count(); i++)
-			{
-				CElementPointer* element = elements[i];
+				CElementPointer* element = elements[elementIndex];
 				if (element != nullptr)
 				{
 					C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
 					if (pEntity != nullptr)
 					{
-						if (modelsPhysOrBones == 0)
+						bool shouldMoveGeneric = true;
+						if (element->GetType() == DAG_MODEL)
 						{
-							char modelNameAndIndex[MAXCHAR];
-							sprintf(modelNameAndIndex, "%d", i);
-							switch (element->GetType())
+							CModelElement* modelDag = (CModelElement*)element->GetPointer();
+							if (modelDag != nullptr)
 							{
-							case DAG_MODEL:
-							{
-								CModelElement* model = (CModelElement*)element->GetPointer();
-								if (model != nullptr)
-									sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, model->GetModelName());
-								break;
-							}
-							case DAG_LIGHT:
-								sprintf(modelNameAndIndex, "%s (Light)", modelNameAndIndex);
-								break;
-							case DAG_CAMERA:
-								sprintf(modelNameAndIndex, "%s (Camera)", modelNameAndIndex);
-								break;
-							case DAG_NONE:
-								sprintf(modelNameAndIndex, "%s (Generic)", modelNameAndIndex);
-								break;
-							}
-							if (i == elementIndex)
-							{
-								//NDebugOverlay::Box(model->GetAbsOrigin(), boundMin, boundMax, colorR_selected, colorG_selected, colorB_selected, colorA_selected, length);
-								NDebugOverlay::EntityTextAtPosition(pEntity->GetAbsOrigin(), 0, modelNameAndIndex, frametime, colorR_selected, colorG_selected, colorB_selected, colorA_selected);
-							}
-							else
-							{
-								// is mouse in 3d bounds
-								Vector screenPos;
-								ScreenTransform(pEntity->GetAbsOrigin(), screenPos);
-								// vector is normalized from -1 to 1, so we have to normalize mouseX and mouseY
-								float mouseXNorm = (mouseX / (float)ScreenWidth()) * 2 - 1;
-								float mouseYNorm = ((mouseY / (float)ScreenHeight()) * 2 - 1) * -1;
-								// instead of directly computing boundMin and boundMax in 3d space, we'll use vector as an estimate
-								if (mouseXNorm > screenPos.x - (vector * 0.1) && mouseXNorm < screenPos.x + (vector * 0.1) && mouseYNorm > screenPos.y - (vector * 0.1) && mouseYNorm < screenPos.y + (vector * 0.1))
+								if (modelDag->IsRagdoll() && boneIndex >= 0)
 								{
-									//NDebugOverlay::Box(model->GetAbsOrigin(), boundMin, boundMax, colorR_hover, colorG_hover, colorB_hover, colorA_hover, length);
-									NDebugOverlay::EntityTextAtPosition(pEntity->GetAbsOrigin(), 0, modelNameAndIndex, frametime, colorR_hover, colorG_hover, colorB_hover, colorA_hover);
-									// forced to use imgui as it swallows mouse input
-									if (clicked)
+									shouldMoveGeneric = false;
+									if (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f)
 									{
-										vgui::surface()->PlaySound("common/wpn_select.wav");
-										// select model
-										clicked = false;
-										g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
-										g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
-										elementIndex = i;
+										IPhysicsObject* bone = modelDag->m_pRagdoll->GetElement(boneIndex);
+										if (bone != nullptr)
+										{
+											PhysForceClearVelocity(bone);
+											bone->Wake();
+											// apply delta to bone
+											Vector origin;
+											QAngle angles;
+											bone->GetPosition(&origin, &angles);
+											angles += deltaAngles;
+											origin += deltaOrigin;
+											bone->SetPosition(origin, angles, true);
+										}
 									}
 								}
-								else
+								else if (nextPoseIndex >= 0)
 								{
-									//NDebugOverlay::Box(model->GetAbsOrigin(), boundMin, boundMax, colorR, colorG, colorB, colorA, length);
-									NDebugOverlay::EntityTextAtPosition(pEntity->GetAbsOrigin(), 0, modelNameAndIndex, frametime, colorR, colorG, colorB, colorA);
+									shouldMoveGeneric = false;
+									int nextPoseIndexTrue = nextPoseIndex;
+									// pretend that the bone is in world space (it isn't)
+									modelDag->PushAllowBoneAccess(true, true, "DirectorsCut");
+									Vector worldVec;
+									QAngle worldAng;
+									MatrixAngles(modelDag->GetBoneForWrite(nextPoseIndexTrue), worldAng, worldVec);
+									poseBoneOrigin = worldVec + modelDag->posadds[nextPoseIndexTrue];
+									poseBoneAngles = worldAng + modelDag->anglehelper[nextPoseIndexTrue];
+									if (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f)
+									{
+										// apply delta to pose
+										poseBoneAngles += deltaAngles;
+										poseBoneOrigin += deltaOrigin;
+										// remove world space for final pose
+										Vector localVec = poseBoneOrigin - worldVec;
+										QAngle localAng = poseBoneAngles - worldAng;
+										modelDag->PoseBones(nextPoseIndexTrue, localVec, localAng);
+									}
+									modelDag->PopBoneAccess("DirectorsCut");
 								}
 							}
 						}
-						else if (element->GetType() == DAG_MODEL)
+						if(shouldMoveGeneric && (newAng.x != 0.f || newAng.y != 0.f || newAng.z != 0.f || newPos.x != 0.f || newPos.y != 0.f || newPos.z != 0.f))
 						{
-							// draw model locations and names
-							CModelElement* model = (CModelElement*)element->GetPointer();
-							if (model != nullptr)
+							// apply delta to entity
+							Vector origin = pEntity->GetAbsOrigin();
+							QAngle angles = pEntity->GetAbsAngles();
+							angles += deltaAngles;
+							origin += deltaOrigin;
+							pEntity->SetAbsOrigin(origin);
+							pEntity->SetAbsAngles(angles);
+						}
+					}
+				}
+			}
+		}
+
+		if (levelInit && newState)
+		{
+			if (selecting)
+			{
+				if (operation != -2)
+				{
+					oldOperation = operation;
+					operation = -2;
+				}
+				// holding down CTRL (selecting) should allow the user to select individual objects
+				float vector = 0.25f;
+				Vector boundMin = Vector(-vector, -vector, -vector);
+				Vector boundMax = Vector(vector, vector, vector);
+				int colorR = 196;
+				int colorG = 107;
+				int colorB = 174;
+				int colorA = 255;
+				int colorR_hover = 255;
+				int colorG_hover = 255;
+				int colorB_hover = 255;
+				int colorA_hover = 255;
+				int colorR_selected = 96;
+				int colorG_selected = 96;
+				int colorB_selected = 96;
+				int colorA_selected = 255;
+				int colorR_frozen = 0;
+				int colorG_frozen = 255;
+				int colorB_frozen = 255;
+				int colorA_frozen = 255;
+				int mouseX, mouseY;
+				bool hovering = false;
+				input->GetFullscreenMousePos(&mouseX, &mouseY);
+				if (elementIndex <= -1)
+					return;
+				int modelsPhysOrBones = 0;
+				if (boneIndex >= 0)
+					modelsPhysOrBones = 1;
+				else if (nextPoseIndex >= 0)
+					modelsPhysOrBones = 2;
+				bool clicked = ImGui::IsMouseClicked(0);
+				// loop all models
+				for (int i = 0; i < elements.Count(); i++)
+				{
+					CElementPointer* element = elements[i];
+					if (element != nullptr)
+					{
+						C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
+						if (pEntity != nullptr)
+						{
+							if (modelsPhysOrBones == 0)
 							{
-								// use the current model
-								CStudioHdr* modelPtr = model->GetModelPtr();
-								if (modelPtr != nullptr)
+								char modelNameAndIndex[CHAR_MAX];
+								sprintf(modelNameAndIndex, "%d", i);
+								// check element->name, if it's not empty, use that instead
+								if (element->name != nullptr && element->name[0] != '\0')
 								{
-									if (modelsPhysOrBones == 1)
+									sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, element->name);
+								}
+
+								switch (element->GetType())
+								{
+								case DAG_MODEL:
+								{
+									CModelElement* model = (CModelElement*)element->GetPointer();
+									if (model != nullptr)
+										sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, model->GetModelName());
+									break;
+								}
+								case DAG_LIGHT:
+									sprintf(modelNameAndIndex, "%s (Light)", modelNameAndIndex);
+									break;
+								case DAG_CAMERA:
+									sprintf(modelNameAndIndex, "%s (Camera)", modelNameAndIndex);
+									break;
+								case DAG_NONE:
+									sprintf(modelNameAndIndex, "%s (Generic)", modelNameAndIndex);
+									break;
+								}
+
+								if (i == elementIndex)
+								{
+									//NDebugOverlay::Box(model->GetAbsOrigin(), boundMin, boundMax, colorR_selected, colorG_selected, colorB_selected, colorA_selected, length);
+									NDebugOverlay::EntityTextAtPosition(pEntity->GetAbsOrigin(), 0, modelNameAndIndex, frametime, colorR_selected, colorG_selected, colorB_selected, colorA_selected);
+								}
+								else
+								{
+									// is mouse in 3d bounds
+									Vector screenPos;
+									ScreenTransform(pEntity->GetAbsOrigin(), screenPos);
+									// vector is normalized from -1 to 1, so we have to normalize mouseX and mouseY
+									float mouseXNorm = (mouseX / (float)ScreenWidth()) * 2 - 1;
+									float mouseYNorm = ((mouseY / (float)ScreenHeight()) * 2 - 1) * -1;
+									// instead of directly computing boundMin and boundMax in 3d space, we'll use vector as an estimate
+									if (!hovering && mouseXNorm > screenPos.x - (vector * 0.1) && mouseXNorm < screenPos.x + (vector * 0.1) && mouseYNorm > screenPos.y - (vector * 0.1) && mouseYNorm < screenPos.y + (vector * 0.1))
 									{
-										// loop all physics objects
-										CRagdoll* pRagdoll = model->m_pRagdoll;
-										if (pRagdoll != nullptr)
+										//NDebugOverlay::Box(model->GetAbsOrigin(), boundMin, boundMax, colorR_hover, colorG_hover, colorB_hover, colorA_hover, length);
+										NDebugOverlay::EntityTextAtPosition(pEntity->GetAbsOrigin(), 0, modelNameAndIndex, frametime, colorR_hover, colorG_hover, colorB_hover, colorA_hover);
+										// forced to use imgui as it swallows mouse input
+										if (clicked)
 										{
-											for (int i = 0; i < pRagdoll->RagdollBoneCount(); i++)
+											vgui::surface()->PlaySound("common/wpn_select.wav");
+											// select model
+											clicked = false;
+											g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
+											g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
+											elementIndex = i;
+										}
+										hoveringInfo[0] = i;
+										hoveringInfo[1] = -1;
+										hoveringInfo[2] = -1;
+										hovering = true;
+									}
+									else
+									{
+										//NDebugOverlay::Box(model->GetAbsOrigin(), boundMin, boundMax, colorR, colorG, colorB, colorA, length);
+										NDebugOverlay::EntityTextAtPosition(pEntity->GetAbsOrigin(), 0, modelNameAndIndex, frametime, colorR, colorG, colorB, colorA);
+									}
+								}
+							}
+							else if (element->GetType() == DAG_MODEL)
+							{
+								// draw model locations and names
+								CModelElement* model = (CModelElement*)element->GetPointer();
+								if (model != nullptr)
+								{
+									// use the current model
+									CStudioHdr* modelPtr = model->GetModelPtr();
+									if (modelPtr != nullptr)
+									{
+										if (modelsPhysOrBones == 1)
+										{
+											// loop all physics objects
+											CRagdoll* pRagdoll = model->m_pRagdoll;
+											if (pRagdoll != nullptr)
 											{
-												IPhysicsObject* pPhys = pRagdoll->GetElement(i);
-												if (pPhys != nullptr)
+												for (int k = 0; k < pRagdoll->RagdollBoneCount(); k++)
 												{
-													// draw physics object locations and names
-													for (int j = 0; j < modelPtr->numbones(); j++)
+													IPhysicsObject* pPhys = pRagdoll->GetElement(k);
+													if (pPhys != nullptr)
 													{
-														mstudiobone_t* bone = modelPtr->pBone(j);
-														if (bone != nullptr)
+														// draw physics object locations and names
+														for (int j = 0; j < modelPtr->numbones(); j++)
 														{
-															if (bone->physicsbone == i)
+															mstudiobone_t* bone = modelPtr->pBone(j);
+															if (bone != nullptr)
 															{
-																Vector physPos;
-																QAngle physAngles;
-																pPhys->GetPosition(&physPos, &physAngles);
-																char nameAndIndex[MAXCHAR];
-																sprintf(nameAndIndex, "%d", i);
-																if (i == boneIndex)
+																if (bone->physicsbone == k)
 																{
-																	//NDebugOverlay::Box(physPos, boundMin, boundMax, colorR_selected, colorG_selected, colorB_selected, colorA_selected, length);
-																	NDebugOverlay::EntityTextAtPosition(physPos, 0, nameAndIndex, frametime, colorR_selected, colorG_selected, colorB_selected, colorA_selected);
-																}
-																else
-																{
-																	// is mouse in 3d bounds
-																	Vector screenPos;
-																	ScreenTransform(physPos, screenPos);
-																	// vector is normalized from -1 to 1, so we have to normalize mouseX and mouseY
-																	float mouseXNorm = (mouseX / (float)ScreenWidth()) * 2 - 1;
-																	float mouseYNorm = ((mouseY / (float)ScreenHeight()) * 2 - 1) * -1;
-																	// instead of directly computing boundMin and boundMax in 3d space, we'll use vector as an estimate
-																	if (mouseXNorm > screenPos.x - (vector * 0.1) && mouseXNorm < screenPos.x + (vector * 0.1) && mouseYNorm > screenPos.y - (vector * 0.1) && mouseYNorm < screenPos.y + (vector * 0.1))
+																	Vector physPos;
+																	QAngle physAngles;
+																	pPhys->GetPosition(&physPos, &physAngles);
+																	char nameAndIndex[CHAR_MAX];
+																	sprintf(nameAndIndex, "%d", k);
+																	if (k == boneIndex)
 																	{
-																		//NDebugOverlay::Box(physPos, boundMin, boundMax, colorR_hover, colorG_hover, colorB_hover, colorA_hover, length);
-																		NDebugOverlay::EntityTextAtPosition(physPos, 0, nameAndIndex, frametime, colorR_hover, colorG_hover, colorB_hover, colorA_hover);
-																		// forced to use imgui as it swallows mouse input
-																		if (clicked)
-																		{
-																			vgui::surface()->PlaySound("common/wpn_select.wav");
-																			// select model
-																			clicked = false;
-																			g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
-																			g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
-																			boneIndex = i;
-																		}
+																		NDebugOverlay::EntityTextAtPosition(physPos, 0, nameAndIndex, frametime, colorR_selected, colorG_selected, colorB_selected, colorA_selected);
 																	}
 																	else
 																	{
-																		//NDebugOverlay::Box(physPos, boundMin, boundMax, colorR, colorG, colorB, colorA, length);
-																		NDebugOverlay::EntityTextAtPosition(physPos, 0, nameAndIndex, frametime, colorR, colorG, colorB, colorA);
+																		// is mouse in 3d bounds
+																		Vector screenPos;
+																		ScreenTransform(physPos, screenPos);
+																		// vector is normalized from -1 to 1, so we have to normalize mouseX and mouseY
+																		float mouseXNorm = (mouseX / (float)ScreenWidth()) * 2 - 1;
+																		float mouseYNorm = ((mouseY / (float)ScreenHeight()) * 2 - 1) * -1;
+																		// instead of directly computing boundMin and boundMax in 3d space, we'll use vector as an estimate
+																		if (!hovering && mouseXNorm > screenPos.x - (vector * 0.1) && mouseXNorm < screenPos.x + (vector * 0.1) && mouseYNorm > screenPos.y - (vector * 0.1) && mouseYNorm < screenPos.y + (vector * 0.1))
+																		{
+																			//NDebugOverlay::Box(physPos, boundMin, boundMax, colorR_hover, colorG_hover, colorB_hover, colorA_hover, length);
+																			NDebugOverlay::EntityTextAtPosition(physPos, 0, nameAndIndex, frametime, colorR_hover, colorG_hover, colorB_hover, colorA_hover);
+																			// forced to use imgui as it swallows mouse input
+																			if (clicked)
+																			{
+																				vgui::surface()->PlaySound("common/wpn_select.wav");
+																				// select model
+																				clicked = false;
+																				g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
+																				g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
+																				boneIndex = k;
+																			}
+																			hoveringInfo[0] = i;
+																			hoveringInfo[1] = k;
+																			hoveringInfo[2] = -1;
+																			hovering = true;
+																		}
+																		else
+																		{
+																			if(pPhys->IsMotionEnabled())
+																				NDebugOverlay::EntityTextAtPosition(physPos, 0, nameAndIndex, frametime, colorR, colorG, colorB, colorA);
+																			else
+																				NDebugOverlay::EntityTextAtPosition(physPos, 0, nameAndIndex, frametime, colorR_frozen, colorG_frozen, colorB_frozen, colorA_frozen);
+																		}
 																	}
+																	break;
 																}
-																break;
 															}
 														}
 													}
 												}
 											}
 										}
-									}
-									else if (modelsPhysOrBones == 2)
-									{
-										model->PushAllowBoneAccess(true, true, "DirectorsCut_PostRender");
-										// loop all pose bones
-										for (int i = 0; i < modelPtr->numbones(); i++)
+										else if (modelsPhysOrBones == 2)
 										{
-											mstudiobone_t* bone = modelPtr->pBone(i);
-											if (bone != nullptr)
+											model->PushAllowBoneAccess(true, true, "DirectorsCut_PostRender");
+											// loop all pose bones
+											for (int k = 0; k < modelPtr->numbones(); k++)
 											{
-												// draw pose bone locations and names
-												Vector worldVec;
-												QAngle worldAng;
-												MatrixAngles(model->GetBoneForWrite(i), worldAng, worldVec);
-												char nameAndIndex[MAXCHAR];
-												sprintf(nameAndIndex, "%d", i); //bone->pszName());
-												//Msg("%s (len: %d)\n", nameAndIndex, strlen(nameAndIndex));
-												// is mouse in 3d bounds
-												Vector screenPos;
-												ScreenTransform(worldVec + model->posadds[i], screenPos);
-												// vector is normalized from -1 to 1, so we have to normalize mouseX and mouseY
-												float mouseXNorm = (mouseX / (float)ScreenWidth()) * 2 - 1;
-												float mouseYNorm = ((mouseY / (float)ScreenHeight()) * 2 - 1) * -1;
-												// instead of directly computing boundMin and boundMax in 3d space, we'll use vector as an estimate
-												if (i == nextPoseIndex)
+												mstudiobone_t* bone = modelPtr->pBone(k);
+												if (bone != nullptr)
 												{
-													//NDebugOverlay::Box(worldVec + model->posadds[i], boundMin, boundMax, colorR_selected, colorG_selected, colorB_selected, colorA_selected, length);
-													NDebugOverlay::EntityTextAtPosition(worldVec + model->posadds[i], 0, nameAndIndex, frametime, colorR_selected, colorG_selected, colorB_selected, colorA_selected);
-												}
-												else
-												{
-													if (mouseXNorm > screenPos.x - (vector * 0.1) && mouseXNorm < screenPos.x + (vector * 0.1) && mouseYNorm > screenPos.y - (vector * 0.1) && mouseYNorm < screenPos.y + (vector * 0.1))
+													// draw pose bone locations and names
+													Vector worldVec;
+													QAngle worldAng;
+													MatrixAngles(model->GetBoneForWrite(k), worldAng, worldVec);
+													char nameAndIndex[CHAR_MAX];
+													sprintf(nameAndIndex, "%d", k); //bone->pszName());
+													//Msg("%s (len: %d)\n", nameAndIndex, strlen(nameAndIndex));
+													// is mouse in 3d bounds
+													Vector screenPos;
+													ScreenTransform(worldVec + model->posadds[k], screenPos);
+													// vector is normalized from -1 to 1, so we have to normalize mouseX and mouseY
+													float mouseXNorm = (mouseX / (float)ScreenWidth()) * 2 - 1;
+													float mouseYNorm = ((mouseY / (float)ScreenHeight()) * 2 - 1) * -1;
+													// instead of directly computing boundMin and boundMax in 3d space, we'll use vector as an estimate
+													if (k == nextPoseIndex)
 													{
-														//NDebugOverlay::Box(worldVec + model->posadds[i], boundMin, boundMax, colorR_hover, colorG_hover, colorB_hover, colorA_hover, length);
-														NDebugOverlay::EntityTextAtPosition(worldVec + model->posadds[i], 0, nameAndIndex, frametime, colorR_hover, colorG_hover, colorB_hover, colorA_hover);
-														// forced to use imgui as it swallows mouse input
-														if (clicked)
-														{
-															vgui::surface()->PlaySound("common/wpn_select.wav");
-															// select model
-															clicked = false;
-															g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
-															g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
-															nextPoseIndex = i;
-														}
+														//NDebugOverlay::Box(worldVec + model->posadds[i], boundMin, boundMax, colorR_selected, colorG_selected, colorB_selected, colorA_selected, length);
+														NDebugOverlay::EntityTextAtPosition(worldVec + model->posadds[i], 0, nameAndIndex, frametime, colorR_selected, colorG_selected, colorB_selected, colorA_selected);
 													}
 													else
 													{
-														//NDebugOverlay::Box(worldVec + model->posadds[i], boundMin, boundMax, colorR, colorG, colorB, colorA, length);
-														NDebugOverlay::EntityTextAtPosition(worldVec + model->posadds[i], 0, nameAndIndex, frametime, colorR, colorG, colorB, colorA);
+														if (!hovering && mouseXNorm > screenPos.x - (vector * 0.1) && mouseXNorm < screenPos.x + (vector * 0.1) && mouseYNorm > screenPos.y - (vector * 0.1) && mouseYNorm < screenPos.y + (vector * 0.1))
+														{
+															//NDebugOverlay::Box(worldVec + model->posadds[i], boundMin, boundMax, colorR_hover, colorG_hover, colorB_hover, colorA_hover, length);
+															NDebugOverlay::EntityTextAtPosition(worldVec + model->posadds[k], 0, nameAndIndex, frametime, colorR_hover, colorG_hover, colorB_hover, colorA_hover);
+															// forced to use imgui as it swallows mouse input
+															if (clicked)
+															{
+																vgui::surface()->PlaySound("common/wpn_select.wav");
+																// select model
+																clicked = false;
+																g_DirectorsCutSystem.deltaOrigin = Vector(0, 0, 0);
+																g_DirectorsCutSystem.deltaAngles = QAngle(0, 0, 0);
+																nextPoseIndex = k;
+															}
+															hoveringInfo[0] = i;
+															hoveringInfo[1] = -1;
+															hoveringInfo[2] = k;
+															hovering = true;
+														}
+														else
+														{
+															//NDebugOverlay::Box(worldVec + model->posadds[i], boundMin, boundMax, colorR, colorG, colorB, colorA, length);
+															NDebugOverlay::EntityTextAtPosition(worldVec + model->posadds[i], 0, nameAndIndex, frametime, colorR, colorG, colorB, colorA);
+														}
 													}
 												}
 											}
+											model->PopBoneAccess("DirectorsCut_PostRender");
 										}
-										model->PopBoneAccess("DirectorsCut_PostRender");
 									}
 								}
 							}
 						}
 					}
 				}
-			}
-		}
-		else if (operation == -2)
-		{
-			operation = oldOperation;
-		}
-		input->ClearInputButton(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP | IN_DUCK | IN_ATTACK | IN_ATTACK2 | IN_RELOAD | IN_USE | IN_CANCEL | IN_LEFT | IN_RIGHT | IN_ATTACK3 | IN_SCORE | IN_SPEED | IN_WALK | IN_ZOOM | IN_BULLRUSH | IN_RUN);
-		// set pose bone index
-		// TODO: make sure bone is in range
-		if (poseIndex != nextPoseIndex && nextPoseIndex >= 0 && elementIndex >= 0 && elementIndex < elements.Count())
-		{
-			CElementPointer* element = elements[elementIndex];
-			if (element != nullptr)
-			{
-				C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
-				if (pEntity != nullptr)
+				if (!hovering)
 				{
-					if (element->GetType() == DAG_MODEL)
+					hoveringInfo[0] = -1;
+					hoveringInfo[1] = -1;
+					hoveringInfo[2] = -1;
+				}
+			}
+			else if (operation == -2)
+			{
+				operation = oldOperation;
+			}
+			input->ClearInputButton(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP | IN_DUCK | IN_ATTACK | IN_ATTACK2 | IN_RELOAD | IN_USE | IN_CANCEL | IN_LEFT | IN_RIGHT | IN_ATTACK3 | IN_SCORE | IN_SPEED | IN_WALK | IN_ZOOM | IN_BULLRUSH | IN_RUN);
+			// set pose bone index
+			// TODO: make sure bone is in range
+			if (poseIndex != nextPoseIndex && nextPoseIndex >= 0 && elementIndex >= 0 && elementIndex < elements.Count())
+			{
+				CElementPointer* element = elements[elementIndex];
+				if (element != nullptr)
+				{
+					C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
+					if (pEntity != nullptr)
 					{
-						CModelElement* pEntity2 = (CModelElement*)element->GetPointer();
-						if (pEntity2 != nullptr)
+						if (element->GetType() == DAG_MODEL)
 						{
-							pEntity2->GetBoneForWrite(nextPoseIndex);
-							poseIndex = nextPoseIndex;
+							CModelElement* pEntity2 = (CModelElement*)element->GetPointer();
+							if (pEntity2 != nullptr)
+							{
+								pEntity2->GetBoneForWrite(nextPoseIndex);
+								poseIndex = nextPoseIndex;
+							}
 						}
 					}
 				}
 			}
 		}
-	}
-	// update all light elements
-	for (int i = 0; i < elements.Count(); i++)
-	{
-		CElementPointer* element = elements[i];
-		if (element != nullptr)
+		// update all light elements
+		for (int i = 0; i < elements.Count(); i++)
 		{
-			C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
-			if (pEntity != nullptr)
+			CElementPointer* element = elements[i];
+			if (element != nullptr)
 			{
-				if (element->GetType() == DAG_LIGHT)
+				C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
+				if (pEntity != nullptr)
 				{
-					CLightElement* pEntity2 = (CLightElement*)element->GetPointer();
-					if (pEntity2 != nullptr)
+					if (element->GetType() == DAG_LIGHT)
 					{
-						// get dir, right, and up from angles
-						QAngle angles = pEntity2->GetAbsAngles();
-						Vector dir, right, up;
-						AngleVectors(angles, &dir, &right, &up);
-						pEntity2->UpdateLight(pEntity2->GetAbsOrigin(), dir, right, up, 1000);
+						CLightElement* pEntity2 = (CLightElement*)element->GetPointer();
+						if (pEntity2 != nullptr)
+						{
+							// get dir, right, and up from angles
+							QAngle angles = pEntity2->GetAbsAngles();
+							Vector dir, right, up;
+							AngleVectors(angles, &dir, &right, &up);
+							pEntity2->UpdateLight(pEntity2->GetAbsOrigin(), dir, right, up, 1000);
+						}
 					}
 				}
 			}
@@ -1607,6 +1870,7 @@ CModelElement* MakeRagdoll(CModelElement* dag, int index)
 				}
 				dag->PopBoneAccess("DirectorsCut_FindChildren");
 			}
+
 			g_DirectorsCutSystem.elements[index]->SetPointer(ragdoll);
 			return ragdoll;
 		}
@@ -1616,27 +1880,31 @@ CModelElement* MakeRagdoll(CModelElement* dag, int index)
 
 CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type)
 {
-	KeyValues* kv = new KeyValues("CElementPointer");
+	// using keyvalues here as parameters may differ between types
+	// also futureproofs new element types
+	KeyValues* kv = new KeyValues("DirectorsCut_CElementPointer");
 
 	switch (type)
 	{
 	case DAG_MODEL:
-		kv->SetString("modelName", cvar_dx_model_name.GetString());
+		kv->SetString("modelName", g_DirectorsCutSystem.modelName);
 		break;
 	case DAG_LIGHT:
-		kv->SetString("lightTexture", cvar_dx_light_texture_name.GetString());
+		kv->SetString("lightTexture", g_DirectorsCutSystem.lightTexture);
 		break;
 	}
 
-	kv->SetFloat("pivot_x", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.x : 0);
-	kv->SetFloat("pivot_y", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.y : 0);
-	kv->SetFloat("pivot_z", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.z : 0);
+	kv->SetFloat("pivotX", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.x : 0);
+	kv->SetFloat("pivotY", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.y : 0);
+	kv->SetFloat("pivotZ", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.z : 0);
 
 	CElementPointer* newElement = new CElementPointer(type, kv);
 	if (newElement != nullptr)
 	{
 		if (add)
 		{
+			g_DirectorsCutSystem.boneIndex = -1;
+			g_DirectorsCutSystem.nextPoseIndex = -1;
 			g_DirectorsCutSystem.elements.AddToTail(newElement);
 			if (setIndex)
 				g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
@@ -1753,3 +2021,85 @@ void CDirectorsCutSystem::LookAt(const float* eye, const float* at, const float*
 	m16[15] = 1.0f;
 }
 
+bool CDummyProxy::Init(IMaterial* pMaterial, KeyValues* pKeyValues)
+{
+	mat = pMaterial;
+	return true;
+};
+
+IMaterial* CDummyProxy::GetMaterial()
+{
+	return mat;
+}
+
+bool CDummyProxyResultFloat::Init(IMaterial* pMaterial, KeyValues* pKeyValues)
+{
+	bool foundVar;
+
+	char const* pResultVarName = pKeyValues->GetString("resultVar");
+	if (!pResultVarName)
+		return false;
+
+	resultVar = pMaterial->FindVar(pResultVarName, &foundVar, false);
+	if (!foundVar)
+		return false;
+
+	resultVar->SetFloatValue(0.f);
+
+	mat = pMaterial;
+	return true;
+};
+
+bool CDummyProxyResultFloatInverted::Init(IMaterial* pMaterial, KeyValues* pKeyValues)
+{
+	bool foundVar;
+
+	char const* pResultVarName = pKeyValues->GetString("resultVar");
+	if (!pResultVarName)
+		return false;
+
+	resultVar = pMaterial->FindVar(pResultVarName, &foundVar, false);
+	if (!foundVar)
+		return false;
+
+	resultVar->SetFloatValue(1.f);
+	
+	mat = pMaterial;
+	return true;
+};
+
+bool CDummyProxyResultRGB::Init(IMaterial* pMaterial, KeyValues* pKeyValues)
+{
+	bool foundVar;
+
+	char const* pResultVarName = pKeyValues->GetString("resultVar");
+	if (!pResultVarName)
+		return false;
+
+	resultVar = pMaterial->FindVar(pResultVarName, &foundVar, false);
+	if (!foundVar)
+		return false;
+
+	resultVar->SetStringValue("[0 0 0]");
+
+	mat = pMaterial;
+	return true;
+};
+
+bool CDummyProxyResultRGBInverted::Init(IMaterial* pMaterial, KeyValues* pKeyValues)
+{
+	bool foundVar;
+
+	char const* pResultVarName = pKeyValues->GetString("resultVar");
+	if (!pResultVarName)
+		return false;
+
+	resultVar = pMaterial->FindVar(pResultVarName, &foundVar, false);
+	if (!foundVar)
+		return false;
+
+	resultVar->SetStringValue("[1 1 1]");
+
+	mat = pMaterial;
+	return true;
+};

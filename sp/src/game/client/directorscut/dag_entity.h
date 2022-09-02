@@ -34,11 +34,14 @@ public:
 	~CElementPointer();
 	void SetType(DAG_ type);
 	DAG_ GetType();
+	void SetPointer(void* pElement, bool setParent);
 	void SetPointer(void* pElement);
 	void* GetPointer();
+	char name[CHAR_MAX];
 protected:
 	DAG_ elementType = DAG_NONE;
 	void* pElement = NULL;
+	void* pParent = NULL; // ragdoll source entity
 };
 
 class CModelElement : public C_BaseFlex
