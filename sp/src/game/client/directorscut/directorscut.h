@@ -84,11 +84,9 @@ public:
 	QAngle playerAngles;
 	QAngle deltaAngles;
 	QAngle poseBoneAngles;
-	CUtlVector < CDirectorsCutElement* > elements;
-	Version directorcut_version = Version(0, 1, 3);
+	CUtlVector < CElementPointer* > elements;
+	Version directorcut_version = Version(0, 1, 4);
 	char* directorscut_author = "KiwifruitDev";
-	std::string modelName = "models/alyx.mdl";
-	std::string lightTexture = "effects/flashlight001";
 	int elementIndex = -1;
 	int nextElementIndex = -1;
 	int boneIndex = -1;
@@ -103,13 +101,13 @@ public:
 	bool cursorState = false;
 	bool imguiActive = false;
 	bool levelInit = false;
-	bool drawGrid = false;
-	bool needToSetPoseBoneToPivot = false;
+	//bool drawGrid = false;
 	bool selecting = false;
 	bool justSetPivot = false;
 	bool pivotMode = false;
 	bool spawnAtPivot = false;
 	bool windowVisibilities[3];
+	bool inspectorDocked = true;
 };
 
 // singleton

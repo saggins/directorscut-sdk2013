@@ -26,16 +26,16 @@ enum DAG_
 
 // this is a base class for all entities that are used in Director's Cut 
 // used for CUtlVector and serialization
-class CDirectorsCutElement
+class CElementPointer
 {
 public:
-	CDirectorsCutElement();
-	CDirectorsCutElement(DAG_ type, KeyValues* params);
-	~CDirectorsCutElement();
-	void SetElementType(DAG_ type);
-	DAG_ GetElementType();
-	void SetElementPointer(void* pElement);
-	void* GetElementPointer();
+	CElementPointer();
+	CElementPointer(DAG_ type, KeyValues* params);
+	~CElementPointer();
+	void SetType(DAG_ type);
+	DAG_ GetType();
+	void SetPointer(void* pElement);
+	void* GetPointer();
 protected:
 	DAG_ elementType = DAG_NONE;
 	void* pElement = NULL;
@@ -64,13 +64,12 @@ public:
 	float forcedFlexes[MAXSTUDIOFLEXCTRL];
 };
 
-class CLightCustomEffect : public C_BaseEntity, public CFlashlightEffect
+class CLightElement : public C_BaseEntity, public CFlashlightEffect
 {
-	DECLARE_CLASS(CLightCustomEffect, C_BaseEntity);
+	DECLARE_CLASS(CLightElement, C_BaseEntity);
 public:
-	CLightCustomEffect();
-	~CLightCustomEffect();
-	virtual void Simulate();
+	CLightElement();
+	~CLightElement();
 	virtual void UpdateLight(const Vector& vecPos, const Vector& vecDir, const Vector& vecRight, const Vector& vecUp, int nDistance);
 };
 

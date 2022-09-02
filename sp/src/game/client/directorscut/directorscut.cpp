@@ -38,13 +38,15 @@ CDirectorsCutSystem &DirectorsCutGameSystem()
 }
 
 CModelElement* MakeRagdoll(CModelElement* dag, int index);
-CDirectorsCutElement* CreateElement(bool add, bool setIndex, DAG_ type);
+CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type);
 
 ConVar cvar_imgui_enabled("dx_imgui_enabled", "1", FCVAR_ARCHIVE, "Enable ImGui");
 ConVar cvar_imgui_input_enabled("dx_imgui_input_enabled", "1", FCVAR_ARCHIVE, "Capture ImGui input");
 ConVar cvar_dx_zoom_distance("dx_zoom_distance", "5.0f", FCVAR_ARCHIVE, "Default zoom distance");
 ConVar cvar_dx_orbit_sensitivity("dx_orbit_sensitivity", "0.1f", FCVAR_ARCHIVE, "Middle click orbit sensitivity");
 ConVar cvar_dx_pan_sensitivity("dx_pan_sensitivity", "0.1f", FCVAR_ARCHIVE, "Shift + middle click pan sensitivity");
+ConVar cvar_dx_model_name("dx_model_name", "models/alyx.mdl", FCVAR_ARCHIVE, "Temporary model selection");
+ConVar cvar_dx_light_texture_name("dx_light_texture_name", "effects/flashlight001", FCVAR_ARCHIVE, "*DUMMY* Temporary light texture selection");
 
 ConCommand cmd_imgui_toggle("dx_imgui_toggle", [](const CCommand& args) {
 	cvar_imgui_enabled.SetValue(!cvar_imgui_enabled.GetBool());
@@ -81,6 +83,9 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 	// Only render Imgui when enabled
 	if (cvar_imgui_enabled.GetBool() && g_DirectorsCutSystem.imguiActive && !engine->IsPaused() && g_DirectorsCutSystem.levelInit)
 	{
+		bool justRemoved = false; // failsafe for removing elements
+		bool gotInput = false;
+
 		ImGuiIO& io = ImGui::GetIO();
 
 		int windowWidth;
@@ -130,9 +135,9 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 			if (ImGui::BeginMenu("View"))
 			{
 				// windows -> show/hide camera window, show/hide element window, show/hide inspector window
-				ImGui::Checkbox("Camera", &g_DirectorsCutSystem.windowVisibilities[0]);
-				ImGui::Checkbox("Elements", &g_DirectorsCutSystem.windowVisibilities[1]);
-				ImGui::Checkbox("Inspector", &g_DirectorsCutSystem.windowVisibilities[2]);
+				ImGui::Checkbox("Camera Window", &g_DirectorsCutSystem.windowVisibilities[0]);
+				ImGui::Checkbox("Element Window & Gizmos", &g_DirectorsCutSystem.windowVisibilities[1]);
+				ImGui::Checkbox("Inspector Window", &g_DirectorsCutSystem.windowVisibilities[2]);
 				ImGui::EndMenu();
 			}
 			if(ImGui::BeginMenu("About"))
@@ -158,102 +163,310 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 		// set up window
 		if (g_DirectorsCutSystem.windowVisibilities[2])
 		{
+			bool docked = g_DirectorsCutSystem.inspectorDocked;
 			ImGui::SetNextWindowPos(ImVec2(windowWidth - 8, 19 + 8), 0, ImVec2(1.0f, 0.0f));
-			ImGui::SetNextWindowSize(ImVec2(264, windowHeight - 96 - 19 - 24), 0);
-			ImGui::Begin("Inspector", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_HorizontalScrollbar);
-
-			for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
+			if (docked)
 			{
-				CDirectorsCutElement* element = g_DirectorsCutSystem.elements[i];
-				if (element == nullptr)
-					break;
-				DAG_ dagType = element->GetElementType();
-				void* elementPtr = element->GetElementPointer();
-				if (elementPtr == nullptr)
-					break;
-				C_BaseEntity* dag = (C_BaseEntity*)elementPtr;
-				if (dag == nullptr)
-					break;
-				// use i as name for tree node
-				char name[MAXCHAR];
-				sprintf(name, "%d", i);
-				switch (element->GetElementType())
+				ImGui::SetNextWindowSize(ImVec2(264, windowHeight - 96 - 19 - 24), 0);
+			}
+			else
+			{
+				ImGui::SetNextWindowSizeConstraints(ImVec2(264, windowHeight - 96 - 19 - 24), ImVec2(windowWidth, windowHeight - 96 - 19 - 24));
+			}
+
+			ImGui::Begin("Inspector", 0, (!docked ? ImGuiWindowFlags_AlwaysAutoResize : ImGuiWindowFlags_NoResize) | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_HorizontalScrollbar);
+
+			if (ImGui::BeginMenu("Spawn"))
+			{
+				if (ImGui::MenuItem("Model"))
+					CreateElement(true, true, DAG_MODEL);
+				if (ImGui::MenuItem("Light"))
+					CreateElement(true, true, DAG_LIGHT);
+				if (ImGui::MenuItem("Camera"))
+					CreateElement(true, true, DAG_CAMERA);
+				if (ImGui::MenuItem("Generic"))
+					CreateElement(true, true, DAG_NONE);
+				ImGui::EndMenu();
+			}
+
+			if (docked)
+			{
+				if (ImGui::Button("Undock"))
+					g_DirectorsCutSystem.inspectorDocked = false;
+			}
+			else
+			{
+				if (ImGui::Button("Dock"))
+					g_DirectorsCutSystem.inspectorDocked = true;
+			}
+
+			ImGui::SameLine();
+			ImGui::Checkbox("Spawn at Pivot", &g_DirectorsCutSystem.spawnAtPivot);
+
+			int flags = ImGuiTreeNodeFlags_DefaultOpen;
+
+			if (ImGui::TreeNodeEx("Pivot", flags | ImGuiTreeNodeFlags_Leaf | (g_DirectorsCutSystem.elementIndex < 0 ? ImGuiTreeNodeFlags_Selected : 0)))
+			{
+				if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
+					g_DirectorsCutSystem.elementIndex = -1;
+				if (g_DirectorsCutSystem.elementIndex < 0)
 				{
-				case DAG_MODEL:
-				{
-					CModelElement* model = (CModelElement*)element->GetElementPointer();
-					if (model != nullptr)
-						sprintf(name, "%s (%s)", name, model->GetModelName());
-					break;
-				}
-				case DAG_LIGHT:
-					sprintf(name, "%s (Light)", name);
-					break;
-				case DAG_CAMERA:
-					sprintf(name, "%s (Camera)", name);
-					break;
-				case DAG_NONE:
-					sprintf(name, "%s (Generic)", name);
-					break;
-				}
-				int flags = (ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_DefaultOpen);
-				if (i == g_DirectorsCutSystem.elementIndex)
-					flags |= ImGuiTreeNodeFlags_Selected;
-				if (ImGui::TreeNodeEx(name, flags))
-				{
-					if (ImGui::IsItemClicked())
+					if (ImGui::BeginPopupContextWindow())
 					{
-						g_DirectorsCutSystem.elementIndex = i;
-						g_DirectorsCutSystem.boneIndex = -1;
-						g_DirectorsCutSystem.nextPoseIndex = -1;
+						// reset pivot
+						if (ImGui::MenuItem("Reset Pivot"))
+							g_DirectorsCutSystem.pivot = Vector(0, 0, 0);
+						ImGui::Text("Origin: %f %f %f", g_DirectorsCutSystem.pivot.x, g_DirectorsCutSystem.pivot.y, g_DirectorsCutSystem.pivot.z);
+						ImGui::EndPopup();
 					}
-					if (dagType == DAG_MODEL)
+				}
+				ImGui::TreePop();
+			}
+
+			if (ImGui::TreeNodeEx("Elements", flags))
+			{
+
+				for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
+				{
+					CElementPointer* element = g_DirectorsCutSystem.elements[i];
+						if (element == nullptr)
+							break;
+						DAG_ dagType = element->GetType();
+						void* elementPtr = element->GetPointer();
+						if (elementPtr == nullptr)
+							break;
+					C_BaseEntity* dag = (C_BaseEntity*)elementPtr;
+					if (dag == nullptr)
+						break;
+					// use i as name for tree node
+					char name[MAXCHAR];
+					sprintf(name, "%d", i);
+					switch (element->GetType())
 					{
-						CModelElement* modelDag = (CModelElement*)elementPtr;
-						CStudioHdr* modelPtr = modelDag->GetModelPtr();
-						if (modelPtr)
+					case DAG_MODEL:
+					{
+						CModelElement* model = (CModelElement*)element->GetPointer();
+						if (model != nullptr)
+							sprintf(name, "%s (%s)", name, model->GetModelName());
+						break;
+					}
+					case DAG_LIGHT:
+						sprintf(name, "%s (Light)", name);
+						break;
+					case DAG_CAMERA:
+						sprintf(name, "%s (Camera)", name);
+						break;
+					default:
+						sprintf(name, "%s", name);
+						break;
+					}
+					if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | (dagType == DAG_MODEL ? 0 : ImGuiTreeNodeFlags_Leaf) | ((i == g_DirectorsCutSystem.elementIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
+					{
+						if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
 						{
-							// show physics objects (ragdolls only)
-							if (modelDag->IsRagdoll())
+							g_DirectorsCutSystem.elementIndex = i;
+							g_DirectorsCutSystem.boneIndex = -1;
+							g_DirectorsCutSystem.nextPoseIndex = -1;
+						}
+						if (g_DirectorsCutSystem.elementIndex == i)
+						{
+							if (ImGui::BeginPopupContextItem("Element"))
 							{
-								if (ImGui::TreeNodeEx("Physics Objects", ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_DefaultOpen))
+								switch (element->GetType())
 								{
-									CRagdoll* ragdoll = modelDag->m_pRagdoll;
-									if (ragdoll)
+								case DAG_MODEL:
+								{
+									ImGui::Text("***** MODEL *****");
+									break;
+								}
+								case DAG_LIGHT:
+									ImGui::Text("***** LIGHT *****");
+									break;
+								case DAG_CAMERA:
+									ImGui::Text("***** CAMERA *****");
+									break;
+								default:
+									ImGui::Text("***** ELEMENT *****");
+									break;
+								}
+								Vector origin = dag->GetAbsOrigin();
+								QAngle angles = dag->GetAbsAngles();
+								if (element->GetType() == DAG_MODEL)
+								{
+									CModelElement* pEntity = (CModelElement*)dag;
+									if (pEntity != nullptr)
 									{
-										for (int j = 0; j < modelDag->m_pRagdoll->RagdollBoneCount(); j++)
+										CStudioHdr* modelPtr = pEntity->GetModelPtr();
+										if (modelPtr)
 										{
-											IPhysicsObject* physObj = ragdoll->GetElement(j);
-											// use j as name for tree node
-											// special case for physics objects: use bone name
-											for (int k = 0; k < modelPtr->numbones(); k++)
+											if (pEntity->IsRagdoll())
 											{
-												mstudiobone_t* bone = modelPtr->pBone(k);
-												if (bone != nullptr)
+												//ImGui::SliderInt("Physics Object Index", &g_DirectorsCutSystem.boneIndex, -1, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
+												CRagdoll* ragdoll = pEntity->m_pRagdoll;
+												if (ragdoll != nullptr)
 												{
-													if (bone->physicsbone == j)
+													if (ImGui::MenuItem("Freeze All"))
 													{
-														char name[MAXCHAR];
-														sprintf(name, "%d (%s)", j, bone->pszName());
-														int physFlags = (ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_DefaultOpen);
-														if (i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.boneIndex)
-															physFlags |= ImGuiTreeNodeFlags_Selected;
-														if (ImGui::TreeNodeEx(name, physFlags))
+														for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
 														{
-															if (ImGui::IsItemClicked())
+															IPhysicsObject* bone = ragdoll->GetElement(i);
+															if (bone != nullptr)
 															{
-																g_DirectorsCutSystem.elementIndex = i;
-																g_DirectorsCutSystem.boneIndex = j;
-																g_DirectorsCutSystem.nextPoseIndex = -1;
+																PhysForceClearVelocity(bone);
+																bone->Sleep();
+																bone->EnableMotion(false);
+																PhysForceClearVelocity(bone);
 															}
-															// show position
-															Vector worldVec;
-															QAngle worldAng;
-															physObj->GetPosition(&worldVec, &worldAng);
-															ImGui::TreePop();
 														}
-														break;
 													}
+													if (ImGui::MenuItem("Unfreeze All"))
+													{
+														for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
+														{
+															IPhysicsObject* bone = ragdoll->GetElement(i);
+															if (bone != nullptr)
+															{
+																PhysForceClearVelocity(bone);
+																bone->EnableMotion(true);
+																bone->Wake();
+																PhysForceClearVelocity(bone);
+															}
+														}
+													}
+												}
+											}
+											else if (modelinfo->GetVCollide(pEntity->GetModelIndex()) != nullptr)
+											{
+												if (ImGui::MenuItem("Make Physical"))
+												{
+													//g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
+													//g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
+													g_DirectorsCutSystem.boneIndex = 0;
+													g_DirectorsCutSystem.poseIndex = -1;
+													MakeRagdoll(pEntity, g_DirectorsCutSystem.elementIndex);
+												}
+											}
+										}
+									}
+								}
+								// remove element
+								if (ImGui::MenuItem("Remove"))
+								{
+									delete element;
+									g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
+									g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
+									g_DirectorsCutSystem.boneIndex = -1;
+									g_DirectorsCutSystem.nextPoseIndex = -1;
+									g_DirectorsCutSystem.flexIndex = -1;
+									justRemoved = true;
+								}
+								ImGui::Text("Origin: %f %f %f", origin.x, origin.y, origin.z);
+								ImGui::Text("Angles: %f %f %f", angles.x, angles.y, angles.z);
+								ImGui::EndPopup();
+							}
+						}
+						if (!justRemoved)
+						{
+							if (dagType == DAG_MODEL)
+							{
+								CModelElement* modelDag = (CModelElement*)elementPtr;
+								CStudioHdr* modelPtr = modelDag->GetModelPtr();
+								if (modelPtr)
+								{
+									// show physics objects (ragdolls only)
+									if (modelDag->IsRagdoll())
+									{
+										if (ImGui::TreeNodeEx("Physics Objects", flags))
+										{
+											CRagdoll* ragdoll = modelDag->m_pRagdoll;
+											if (ragdoll)
+											{
+												for (int j = 0; j < modelDag->m_pRagdoll->RagdollBoneCount(); j++)
+												{
+													IPhysicsObject* physObj = ragdoll->GetElement(j);
+													// use j as name for tree node
+													// special case for physics objects: use bone name
+													for (int k = 0; k < modelPtr->numbones(); k++)
+													{
+														mstudiobone_t* bone = modelPtr->pBone(k);
+														if (bone != nullptr)
+														{
+															if (bone->physicsbone == j)
+															{
+																char name[MAXCHAR];
+																sprintf(name, "%d (%s)", j, bone->pszName());
+																// change text color to cyan when frozen
+																if(!physObj->IsMotionEnabled())
+																	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
+																if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Leaf | ((i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.boneIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
+																{
+																	if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
+																	{
+																		g_DirectorsCutSystem.elementIndex = i;
+																		g_DirectorsCutSystem.boneIndex = j;
+																		g_DirectorsCutSystem.nextPoseIndex = -1;
+																	}
+																	if (g_DirectorsCutSystem.elementIndex == i && g_DirectorsCutSystem.boneIndex == j)
+																	{
+																		if (ImGui::BeginPopupContextItem("Physics Object"))
+																		{
+																			ImGui::Text("***** PHYSICS OBJECT *****");
+																			Vector origin = dag->GetAbsOrigin();
+																			QAngle angles = dag->GetAbsAngles();
+																			modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&origin, &angles);
+																			ImGui::Text("Origin: %f %f %f", origin.x, origin.y, origin.z);
+																			ImGui::Text("Angles: %f %f %f", angles.x, angles.y, angles.z);
+																			ImGui::EndPopup();
+																		}
+																	}
+																	// show position
+																	Vector worldVec;
+																	QAngle worldAng;
+																	physObj->GetPosition(&worldVec, &worldAng);
+																	ImGui::TreePop();
+																}
+																// pop color
+																if(!physObj->IsMotionEnabled())
+																	ImGui::PopStyleColor();
+																break;
+															}
+														}
+													}
+												}
+												ImGui::TreePop();
+											}
+										}
+									}
+									// show pose bones
+									if (ImGui::TreeNodeEx("Pose Bones", flags))
+									{
+										for (int j = 0; j < modelPtr->numbones(); j++)
+										{
+											mstudiobone_t* bone = modelPtr->pBone(j);
+											if (bone != nullptr)
+											{
+												char name[MAXCHAR];
+												sprintf(name, "%d (%s)", j, bone->pszName());
+												if (ImGui::TreeNodeEx(name, flags | ImGuiTreeNodeFlags_Leaf | ((i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.nextPoseIndex) ? ImGuiTreeNodeFlags_Selected : 0)))
+												{
+													if (ImGui::IsItemClicked(0) || ImGui::IsItemClicked(1))
+													{
+														g_DirectorsCutSystem.elementIndex = i;
+														g_DirectorsCutSystem.boneIndex = -1;
+														g_DirectorsCutSystem.nextPoseIndex = j;
+													}
+													if (g_DirectorsCutSystem.elementIndex == i && g_DirectorsCutSystem.nextPoseIndex == j)
+													{
+														if (ImGui::BeginPopupContextItem("Pose Bone"))
+														{
+															ImGui::Text("***** POSE BONE *****");
+															ImGui::Text("Origin: %f %f %f", g_DirectorsCutSystem.poseBoneOrigin.x, g_DirectorsCutSystem.poseBoneOrigin.y, g_DirectorsCutSystem.poseBoneOrigin.z);
+															ImGui::Text("Angles: %f %f %f", g_DirectorsCutSystem.poseBoneAngles.x, g_DirectorsCutSystem.poseBoneAngles.y, g_DirectorsCutSystem.poseBoneAngles.z);
+															ImGui::EndPopup();
+														}
+													}
+													// FIXME: can't show position in drawing code!
+													ImGui::TreePop();
 												}
 											}
 										}
@@ -261,263 +474,222 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 									}
 								}
 							}
-							// show pose bones
-							if (ImGui::TreeNodeEx("Pose Bones", ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_DefaultOpen))
-							{
-								for (int j = 0; j < modelPtr->numbones(); j++)
-								{
-									mstudiobone_t* bone = modelPtr->pBone(j);
-									if (bone != nullptr)
-									{
-										char name[MAXCHAR];
-										sprintf(name, "%d (%s)", j, bone->pszName());
-										int physFlags = (ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_DefaultOpen);
-										if (i == g_DirectorsCutSystem.elementIndex && j == g_DirectorsCutSystem.nextPoseIndex)
-											physFlags |= ImGuiTreeNodeFlags_Selected;
-										if (ImGui::TreeNodeEx(name, physFlags))
-										{
-											if (ImGui::IsItemClicked())
-											{
-												g_DirectorsCutSystem.elementIndex = i;
-												g_DirectorsCutSystem.boneIndex = -1;
-												g_DirectorsCutSystem.nextPoseIndex = j;
-											}
-											// FIXME: can't show position in drawing code!
-											ImGui::TreePop();
-										}
-									}
-								}
-								ImGui::TreePop();
-							}
 						}
+						ImGui::TreePop();
 					}
-					ImGui::TreePop();
 				}
+				ImGui::TreePop();
 			}
 
 			// end window
 			ImGui::End();
 		}
 
-		// Perspective camera view
-		// Orthographic mode is not supported
-		const CViewSetup* viewSetup = view->GetViewSetup();
-		float fov = viewSetup->fov * g_DirectorsCutSystem.fovAdjustment;
-		g_DirectorsCutSystem.Perspective(fov, io.DisplaySize.x / io.DisplaySize.y, 0.01f, viewSetup->zFar, g_DirectorsCutSystem.cameraProjection); //viewSetup->zNear, viewSetup->zFar, g_DirectorsCutSystem.cameraProjection);
-
-		ImGuizmo::SetOrthographic(g_DirectorsCutSystem.orthographic);
-
-		if (g_DirectorsCutSystem.windowVisibilities[0])
+		if(justRemoved)
 		{
-			ImGui::Begin("Camera", 0, ImGuiWindowFlags_AlwaysAutoResize);
+			// stop everything
+		}
+		else
+		{
+			// continue
 
-			ImGui::LabelText("Origin", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineOrigin.x, g_DirectorsCutSystem.engineOrigin.y, g_DirectorsCutSystem.engineOrigin.z);
-			ImGui::LabelText("Angles", "%.0f %.0f %.0f", g_DirectorsCutSystem.engineAngles.x, g_DirectorsCutSystem.engineAngles.y, g_DirectorsCutSystem.engineAngles.z);
+			// Perspective camera view
+			// Orthographic mode is not supported
+			const CViewSetup* viewSetup = view->GetViewSetup();
+			float fov = viewSetup->fov * g_DirectorsCutSystem.fovAdjustment;
+			g_DirectorsCutSystem.Perspective(fov, io.DisplaySize.x / io.DisplaySize.y, 0.01f, viewSetup->zFar, g_DirectorsCutSystem.cameraProjection); //viewSetup->zNear, viewSetup->zFar, g_DirectorsCutSystem.cameraProjection);
 
-			float pivot[3];
-			pivot[0] = g_DirectorsCutSystem.pivot.x;
-			pivot[1] = g_DirectorsCutSystem.pivot.y;
-			pivot[2] = g_DirectorsCutSystem.pivot.z;
-			ImGui::InputFloat3("Pivot", pivot);
-			g_DirectorsCutSystem.pivot.x = pivot[0];
-			g_DirectorsCutSystem.pivot.y = pivot[1];
-			g_DirectorsCutSystem.pivot.z = pivot[2];
+			ImGuizmo::SetOrthographic(g_DirectorsCutSystem.orthographic);
 
-
-			if (ImGui::Button("Map Origin to Pivot (O)") || ImGui::IsKeyPressed(ImGuiKey_O, false))
-				g_DirectorsCutSystem.pivot = Vector(0, 0, 0);
-
-			if (ImGui::Button("Player Eyes to Pivot (P)") || ImGui::IsKeyPressed(ImGuiKey_P, false))
-				g_DirectorsCutSystem.pivot = g_DirectorsCutSystem.playerOrigin;
-
-			// Element pivot change
-			if (g_DirectorsCutSystem.elementIndex > -1)
+			if (g_DirectorsCutSystem.windowVisibilities[0])
 			{
-				CDirectorsCutElement* element;
-				if (g_DirectorsCutSystem.elementIndex > g_DirectorsCutSystem.elements.Count() - 1)
-					g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
-				if (g_DirectorsCutSystem.elements.Count() > 0)
-					element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
-				else
-					element = nullptr;
-				if (element != nullptr)
+				ImGui::Begin("Camera", 0, ImGuiWindowFlags_AlwaysAutoResize);
+
+				bool taken = false;
+
+				// Element pivot change
+				if (g_DirectorsCutSystem.elementIndex > -1)
 				{
-					DAG_ dagType = element->GetElementType();
-					void* elementPtr = element->GetElementPointer();
-					if (elementPtr != nullptr)
+					CElementPointer* element;
+					if (g_DirectorsCutSystem.elementIndex > g_DirectorsCutSystem.elements.Count() - 1)
+						g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
+					if (g_DirectorsCutSystem.elements.Count() > 0)
+						element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
+					else
+						element = nullptr;
+					if (element != nullptr)
 					{
-						C_BaseEntity* dag = (C_BaseEntity*)elementPtr;
-						if (dag != nullptr)
+						DAG_ dagType = element->GetType();
+						void* elementPtr = element->GetPointer();
+						if (elementPtr != nullptr)
 						{
-							if (ImGui::Button("Selected Element to Pivot (Q)") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+							C_BaseEntity* dag = (C_BaseEntity*)elementPtr;
+							if (dag != nullptr)
 							{
-								g_DirectorsCutSystem.pivot = dag->GetAbsOrigin();
-							}
-							if (dagType == DAG_MODEL)
-							{
-								CModelElement* modelDag = (CModelElement*)elementPtr;
-								if (modelDag != nullptr)
+								if (dagType == DAG_MODEL)
 								{
-									if (modelDag->IsRagdoll())
+									CModelElement* modelDag = (CModelElement*)elementPtr;
+									if (modelDag != nullptr)
 									{
-										if (g_DirectorsCutSystem.boneIndex > -1)
+										if (modelDag->IsRagdoll())
 										{
-											if (ImGui::Button("Selected Physics Object to Pivot (Z)") || ImGui::IsKeyPressed(ImGuiKey_Z, false))
+											if (g_DirectorsCutSystem.boneIndex > -1)
 											{
-												QAngle dummy;
-												modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&g_DirectorsCutSystem.pivot, &dummy);
+												if (ImGui::Button("Selected Physics Object to Pivot (Q)") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+												{
+													QAngle dummy;
+													modelDag->m_pRagdoll->GetElement(g_DirectorsCutSystem.boneIndex)->GetPosition(&g_DirectorsCutSystem.pivot, &dummy);
+												}
+												taken = true;
 											}
 										}
-									}
-									if (g_DirectorsCutSystem.nextPoseIndex > -1)
-									{
-										if (ImGui::Button("Selected Pose Bone to Pivot (Z)") || ImGui::IsKeyPressed(ImGuiKey_Z, false))
+										if (!taken && g_DirectorsCutSystem.nextPoseIndex > -1)
 										{
-											QAngle dummy;
-											g_DirectorsCutSystem.needToSetPoseBoneToPivot = true;
+											if (ImGui::Button("Selected Pose Bone to Pivot (Q)") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+												g_DirectorsCutSystem.pivot = g_DirectorsCutSystem.poseBoneOrigin;
+											taken = true;
 										}
 									}
+								}
+								if (!taken)
+								{
+									if (ImGui::Button("Selected Element to Pivot (Q)") || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+										g_DirectorsCutSystem.pivot = dag->GetAbsOrigin();
+									taken = true;
 								}
 							}
 						}
 					}
 				}
-			}
 
-			// Camera adjustments
-			bool viewDirty = false;
-
-			// TODO: camera dags should unlock field of view slider and hide gizmos
-			//viewDirty |= ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
-			ImGui::LabelText("Field of View", "%.0f", g_DirectorsCutSystem.fov);
-
-			float oldDistance = g_DirectorsCutSystem.distance;
-			float mouseDistance = -io.MouseWheel * cvar_dx_zoom_distance.GetFloat();
-			float newDistance = g_DirectorsCutSystem.distance + mouseDistance;
-
-			if (newDistance >= 5.f && newDistance <= 1000.f)
-				g_DirectorsCutSystem.distance = newDistance;
-			else if (newDistance < 5.f)
-				g_DirectorsCutSystem.distance = 5.f;
-			else if (newDistance > 1000.f)
-				g_DirectorsCutSystem.distance = 1000.f;
-
-			if (oldDistance != g_DirectorsCutSystem.distance)
-				viewDirty = true;
-
-			viewDirty |= ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 5, 1000.0f, "%.0f");
-
-			// Camera movement
-			if (ImGui::IsMouseDown(2))
-			{
-				float sensitivity;
-				Vector2D mouseDelta = Vector2D(io.MouseDelta.x, io.MouseDelta.y);
-
-				// Middle click orbit
-				sensitivity = cvar_dx_orbit_sensitivity.GetFloat();
-				g_DirectorsCutSystem.camYAngle += mouseDelta.x * sensitivity;
-				g_DirectorsCutSystem.camXAngle += mouseDelta.y * sensitivity;
-
-				viewDirty = true;
-			}
-
-			// Reset camera view to accommodate new distance
-			if (viewDirty || firstFrame)
-			{
-				float eye[3];
-				eye[0] = cosf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
-				eye[1] = sinf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
-				eye[2] = sinf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
-				float at[] = { 0.f, 0.f, 0.f };
-				float up[] = { 0.f, 1.f, 0.f };
-				g_DirectorsCutSystem.LookAt(eye, at, up, g_DirectorsCutSystem.cameraView);
-				firstFrame = false;
-			}
-
-			// Grid
-			ImGui::Checkbox("Draw Grid", &g_DirectorsCutSystem.drawGrid);
-			if (g_DirectorsCutSystem.drawGrid)
-			{
-				ImGui::InputFloat("Grid Size", &g_DirectorsCutSystem.gridSize);
-			}
-
-			// Operation (gizmo mode)
-			ImGui::SliderInt("Set Operation", &g_DirectorsCutSystem.operation, -1, 2);
-			switch (g_DirectorsCutSystem.operation)
-			{
-			case -1:
-				ImGui::LabelText("Operation", "None");
-				break;
-			case 0:
-				ImGui::LabelText("Operation", "Translate");
-				mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
-				break;
-			case 1:
-				ImGui::LabelText("Operation", "Rotate");
-				mCurrentGizmoOperation = ImGuizmo::ROTATE;
-				break;
-			case 2:
-				ImGui::LabelText("Operation", "Universal");
-				mCurrentGizmoOperation = ImGuizmo::TRANSLATE | ImGuizmo::ROTATE;
-			}
-			if (ImGui::IsKeyPressed(ImGuiKey_N, false))
-				g_DirectorsCutSystem.operation = -1;
-			if (ImGui::IsKeyPressed(ImGuiKey_T, false))
-				g_DirectorsCutSystem.operation = 0;
-			if (ImGui::IsKeyPressed(ImGuiKey_R, false))
-				g_DirectorsCutSystem.operation = 1;
-			if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
-				g_DirectorsCutSystem.operation = 2;
-
-			// Snapping
-			ImGui::Checkbox("Use Snapping", &g_DirectorsCutSystem.useSnap);
-			if (g_DirectorsCutSystem.useSnap)
-				ImGui::InputFloat3("Snap", g_DirectorsCutSystem.snap);
-
-			ImGui::SliderFloat("Time Scale", &g_DirectorsCutSystem.timeScale, 0.01f, 1.f, "%.2f");
-
-			// Global space toggles
-			if (ImGui::RadioButton("Local", mCurrentGizmoMode == ImGuizmo::LOCAL))
-				mCurrentGizmoMode = ImGuizmo::LOCAL;
-			ImGui::SameLine();
-			if (ImGui::RadioButton("World", mCurrentGizmoMode == ImGuizmo::WORLD))
-				mCurrentGizmoMode = ImGuizmo::WORLD;
-			ImGui::SameLine();
-			ImGui::Text("(L)");
-
-			if (ImGui::IsKeyPressed(ImGuiKey_L, false))
-			{
-				if (mCurrentGizmoMode == ImGuizmo::LOCAL)
-					mCurrentGizmoMode = ImGuizmo::WORLD;
-				else
-					mCurrentGizmoMode = ImGuizmo::LOCAL;
-			}
-
-
-			ImGui::End();
-		}
-
-		if (g_DirectorsCutSystem.windowVisibilities[1])
-		{
-
-			ImGui::Begin("Elements", 0, ImGuiWindowFlags_AlwaysAutoResize);
-
-			if (!g_DirectorsCutSystem.levelInit)
-			{
-				ImGui::Text("Level not loaded");
-			}
-			else
-			{
-				ImGui::Checkbox("Select Pivot", &g_DirectorsCutSystem.pivotMode);
-				float modelMatrixPivot[16];
-				Vector posPivot = g_DirectorsCutSystem.newPivot;
-				QAngle angPivot = QAngle();
-				float sPivot = 1.f;
-				static float translationPivot[3], rotationPivot[3], scalePivot[3];
-				if (g_DirectorsCutSystem.pivotMode)
+				if (!taken)
 				{
-					if (g_DirectorsCutSystem.operation > 0)
+					if (ImGui::Button("Map Origin to Pivot (O)") || ImGui::IsKeyPressed(ImGuiKey_O, false))
+						g_DirectorsCutSystem.pivot = Vector(0, 0, 0);
+				}
+
+				// Camera adjustments
+				bool viewDirty = false;
+
+				// TODO: camera dags should unlock field of view slider and hide gizmos
+				//viewDirty |= ImGui::SliderFloat("Field of View", &g_DirectorsCutSystem.fov, 1, 179.0f, "%.0f");
+				//ImGui::LabelText("Field of View", "%.0f", g_DirectorsCutSystem.fov);
+
+				float oldDistance = g_DirectorsCutSystem.distance;
+				float mouseDistance = -io.MouseWheel * cvar_dx_zoom_distance.GetFloat();
+				float newDistance = g_DirectorsCutSystem.distance + mouseDistance;
+
+				if (newDistance >= 5.f && newDistance <= 1000.f)
+					g_DirectorsCutSystem.distance = newDistance;
+				else if (newDistance < 5.f)
+					g_DirectorsCutSystem.distance = 5.f;
+				else if (newDistance > 1000.f)
+					g_DirectorsCutSystem.distance = 1000.f;
+
+				if (oldDistance != g_DirectorsCutSystem.distance)
+					viewDirty = true;
+
+				viewDirty |= ImGui::SliderFloat("Distance", &g_DirectorsCutSystem.distance, 5, 1000.0f, "%.0f");
+
+				// Camera movement
+				if (ImGui::IsMouseDown(2))
+				{
+					float sensitivity;
+					Vector2D mouseDelta = Vector2D(io.MouseDelta.x, io.MouseDelta.y);
+
+					// Middle click orbit
+					sensitivity = cvar_dx_orbit_sensitivity.GetFloat();
+					g_DirectorsCutSystem.camYAngle += mouseDelta.x * sensitivity;
+					g_DirectorsCutSystem.camXAngle += mouseDelta.y * sensitivity;
+
+					viewDirty = true;
+				}
+
+				// Reset camera view to accommodate new distance
+				if (viewDirty || firstFrame)
+				{
+					float eye[3];
+					eye[0] = cosf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
+					eye[1] = sinf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
+					eye[2] = sinf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
+					float at[] = { 0.f, 0.f, 0.f };
+					float up[] = { 0.f, 1.f, 0.f };
+					g_DirectorsCutSystem.LookAt(eye, at, up, g_DirectorsCutSystem.cameraView);
+					firstFrame = false;
+				}
+
+				// Grid
+				/*
+				ImGui::Checkbox("Draw Grid", &g_DirectorsCutSystem.drawGrid);
+				if (g_DirectorsCutSystem.drawGrid)
+				{
+					ImGui::InputFloat("Grid Size", &g_DirectorsCutSystem.gridSize);
+				}
+				*/
+
+				ImGui::SliderFloat("Time Scale", &g_DirectorsCutSystem.timeScale, 0.01f, 1.f, "%.2f");
+
+				// Snapping
+				ImGui::Checkbox("Use Snapping", &g_DirectorsCutSystem.useSnap);
+				if (g_DirectorsCutSystem.useSnap)
+					gotInput |= ImGui::InputFloat3("Snap", g_DirectorsCutSystem.snap);
+
+				// Operation (gizmo mode)
+				if (ImGui::RadioButton("None", g_DirectorsCutSystem.operation < 0))
+					g_DirectorsCutSystem.operation = -1;
+				ImGui::SameLine();
+				if (ImGui::RadioButton("Translate", g_DirectorsCutSystem.operation == 0))
+					g_DirectorsCutSystem.operation = 0;
+				if (ImGui::RadioButton("Rotate", g_DirectorsCutSystem.operation == 1))
+					g_DirectorsCutSystem.operation = 1;
+				ImGui::SameLine();
+				if (ImGui::RadioButton("Universal", g_DirectorsCutSystem.operation == 2))
+					g_DirectorsCutSystem.operation = 2;
+
+				switch (g_DirectorsCutSystem.operation)
+				{
+				case 0:
+					mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
+					break;
+				case 1:
+					mCurrentGizmoOperation = ImGuizmo::ROTATE;
+					break;
+				case 2:
+					mCurrentGizmoOperation = ImGuizmo::TRANSLATE | ImGuizmo::ROTATE;
+				}
+
+				// Global space toggles
+				if (ImGui::RadioButton("Local", mCurrentGizmoMode == ImGuizmo::LOCAL))
+					mCurrentGizmoMode = ImGuizmo::LOCAL;
+				ImGui::SameLine();
+				if (ImGui::RadioButton("World", mCurrentGizmoMode == ImGuizmo::WORLD))
+					mCurrentGizmoMode = ImGuizmo::WORLD;
+				ImGui::SameLine();
+
+				if (ImGui::IsKeyPressed(ImGuiKey_L, false))
+				{
+					if (mCurrentGizmoMode == ImGuizmo::LOCAL)
+						mCurrentGizmoMode = ImGuizmo::WORLD;
+					else
+						mCurrentGizmoMode = ImGuizmo::LOCAL;
+				}
+
+				ImGui::End();
+			}
+
+			if (g_DirectorsCutSystem.levelInit && g_DirectorsCutSystem.windowVisibilities[1])
+			{
+				if (g_DirectorsCutSystem.elementIndex < 0)
+				{
+					if (g_DirectorsCutSystem.operation >= 0)
 					{
+						float modelMatrixPivot[16];
+						Vector posPivot = g_DirectorsCutSystem.newPivot;
+						QAngle angPivot = QAngle();
+						float sPivot = 1.f;
+						static float translationPivot[3], rotationPivot[3], scalePivot[3];
+
+						// pivot mode
 						ImGuizmo::SetID(-1);
 
 						// Add offset (pivot) to translation
@@ -552,8 +724,6 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 						rotation2[2] = -deltaRotation[2];
 						if (ImGuizmo::IsUsing())
 						{
-							ImGui::LabelText("Delta Translation", "%f %f %f", deltaTranslation[0], deltaTranslation[1], deltaTranslation[2]);
-							ImGui::LabelText("Delta Rotation", "%f %f %f", deltaRotation[0], deltaRotation[1], deltaRotation[2]);
 							// Create source vars from new values
 							Vector newPos = Vector(0, 0, 0);
 							QAngle newAng = QAngle(rotation2[0], rotation2[1], rotation2[2]);
@@ -576,27 +746,17 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 				}
 				else
 				{
-					ImGui::InputText("Model Name", &g_DirectorsCutSystem.modelName);
-
-					if (ImGui::Button("Spawn Model"))
-						CreateElement(true, true, DAG_MODEL);
-					ImGui::SameLine();
-					if (ImGui::Button("Spawn Light"))
-						CreateElement(true, true, DAG_LIGHT);
-					if (ImGui::Button("Spawn Camera"))
-						CreateElement(true, true, DAG_CAMERA);
-					ImGui::SameLine();
-					if (ImGui::Button("Spawn Generic"))
-						CreateElement(true, true, DAG_NONE);
-
-					ImGui::Checkbox("Spawn at Pivot", &g_DirectorsCutSystem.spawnAtPivot);
+					ImGui::Begin("Element", 0, ImGuiWindowFlags_AlwaysAutoResize);
 
 					if (g_DirectorsCutSystem.elements.Count() > 0)
 					{
 						// failsafe
 						if (g_DirectorsCutSystem.elementIndex < 0)
 							g_DirectorsCutSystem.elementIndex = 0;
-						ImGui::LabelText("Elements", "%d", g_DirectorsCutSystem.elements.Count());
+
+						ImGui::LabelText("Element Index", "%d", g_DirectorsCutSystem.elementIndex);
+
+						/*
 						if (g_DirectorsCutSystem.elements.Count() > 1)
 						{
 							if (ImGui::SliderInt("Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.elements.Count() - 1))
@@ -606,41 +766,73 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 								g_DirectorsCutSystem.flexIndex = -1;
 							}
 						}
-						else
-						{
-							ImGui::LabelText("Index", "%d", g_DirectorsCutSystem.elementIndex);
-						}
-						CDirectorsCutElement* element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
+						*/
+						CElementPointer* element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
 						if (element != nullptr)
 						{
-							switch (element->GetElementType())
+							switch (element->GetType())
 							{
 							case DAG_MODEL:
-								CModelElement* pEntity = (CModelElement*)element->GetElementPointer();
+								CModelElement* pEntity = (CModelElement*)element->GetPointer();
 								if (pEntity != nullptr)
 								{
-									ImGui::LabelText("Selected Model Name", "%s", pEntity->GetModelPtr()->pszName());
 									CStudioHdr* modelPtr = pEntity->GetModelPtr();
 									if (modelPtr)
 									{
-										if (pEntity->IsRagdoll())
+										ImGui::LabelText("Model Name", "%s", pEntity->GetModelPtr()->pszName());
+										for (int i = 0; i < modelPtr->numbones(); i++)
 										{
-											for (int i = 0; i < modelPtr->numbones(); i++)
+											mstudiobone_t* bone = modelPtr->pBone(i);
+											if (bone != nullptr)
 											{
-												mstudiobone_t* bone = modelPtr->pBone(i);
-												if (bone != nullptr)
+												if (i == g_DirectorsCutSystem.nextPoseIndex)
 												{
-													if (bone->physicsbone == g_DirectorsCutSystem.boneIndex)
-													{
-														char* boneName = bone->pszName();
-														ImGui::LabelText("Physics Object Name", "%s", boneName);
-														break;
-													}
+													ImGui::LabelText("Pose Bone Index", "%d", g_DirectorsCutSystem.nextPoseIndex);
+													char* boneName = bone->pszName();
+													ImGui::LabelText("Pose Bone Name", "%s", boneName);
+													break;
+												}
+												else if (bone->physicsbone == g_DirectorsCutSystem.boneIndex)
+												{
+													ImGui::LabelText("Physics Object Index", "%d", g_DirectorsCutSystem.boneIndex);
+													char* boneName = bone->pszName();
+													ImGui::LabelText("Physics Object Name", "%s", boneName);
+													break;
 												}
 											}
-											ImGui::SliderInt("Physics Object Index", &g_DirectorsCutSystem.boneIndex, -1, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
+										}
+										//ImGui::SliderInt("Pose Bone Index", &g_DirectorsCutSystem.nextPoseIndex, -1, modelPtr->numbones() - 1);
+										ImGui::SliderInt("Flex Index", &g_DirectorsCutSystem.flexIndex, -1, modelPtr->numflexcontrollers() - 1);
+										for (int i = 0; i < (int)modelPtr->numflexcontrollers(); i++)
+										{
+											if (i == g_DirectorsCutSystem.flexIndex)
+											{
+												mstudioflexcontroller_t* pflexcontroller = modelPtr->pFlexcontroller((LocalFlexController_t)i);
+												char* flexName = (char*)pEntity->GetFlexControllerName((LocalFlexController_t)i);
+												if (pflexcontroller->max != pflexcontroller->min)
+												{
+													float flex = pEntity->GetFlexWeight((LocalFlexController_t)i);
+													ImGui::SliderFloat(flexName, &flex, pflexcontroller->min, pflexcontroller->max);
+													pEntity->SetFlexWeight((LocalFlexController_t)i, flex);
+												}
+												else
+												{
+													ImGui::LabelText("Flex", "%s", flexName);
+												}
+												break;
+											}
+										}
+										/*
+										if (ImGui::Button("View Target to Camera"))
+										{
+											modelrender->SetViewTarget(modelPtr, pEntity->GetBody(), g_DirectorsCutSystem.engineOrigin);
+										}
+										*/
+										if (pEntity->IsRagdoll() && g_DirectorsCutSystem.boneIndex >= 0)
+										{
+											//ImGui::SliderInt("Physics Object Index", &g_DirectorsCutSystem.boneIndex, -1, pEntity->m_pRagdoll->RagdollBoneCount() - 1);
 											CRagdoll* ragdoll = pEntity->m_pRagdoll;
-											if (ragdoll != nullptr && g_DirectorsCutSystem.boneIndex >= 0)
+											if (ragdoll != nullptr)
 											{
 												IPhysicsObject* bone = ragdoll->GetElement(g_DirectorsCutSystem.boneIndex);
 												if (bone != nullptr)
@@ -668,105 +860,17 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 													}
 												}
 											}
-											if (ImGui::Button("Freeze All"))
-											{
-												for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
-												{
-													IPhysicsObject* bone = ragdoll->GetElement(i);
-													if (bone != nullptr)
-													{
-														PhysForceClearVelocity(bone);
-														bone->Sleep();
-														bone->EnableMotion(false);
-														PhysForceClearVelocity(bone);
-													}
-												}
-											}
-											ImGui::SameLine();
-											if (ImGui::Button("Unfreeze All"))
-											{
-												for (int i = 0; i < ragdoll->RagdollBoneCount(); i++)
-												{
-													IPhysicsObject* bone = ragdoll->GetElement(i);
-													if (bone != nullptr)
-													{
-														PhysForceClearVelocity(bone);
-														bone->EnableMotion(true);
-														bone->Wake();
-														PhysForceClearVelocity(bone);
-													}
-												}
-											}
-										}
-										else if (modelinfo->GetVCollide(pEntity->GetModelIndex()) != nullptr)
-										{
-											if (ImGui::Button("Make Physical"))
-											{
-												//g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
-												//g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
-												g_DirectorsCutSystem.boneIndex = -1;
-												MakeRagdoll(pEntity, g_DirectorsCutSystem.elementIndex);
-											}
-										}
-										for (int i = 0; i < modelPtr->numbones(); i++)
-										{
-											mstudiobone_t* bone = modelPtr->pBone(i);
-											if (bone != nullptr)
-											{
-												if (i == g_DirectorsCutSystem.nextPoseIndex)
-												{
-													char* boneName = bone->pszName();
-													ImGui::LabelText("Pose Bone Name", "%s", boneName);
-													break;
-												}
-											}
-										}
-										ImGui::SliderInt("Pose Bone Index", &g_DirectorsCutSystem.nextPoseIndex, -1, modelPtr->numbones() - 1);
-										for (int i = 0; i < (int)modelPtr->numflexcontrollers(); i++)
-										{
-											if (i == g_DirectorsCutSystem.flexIndex)
-											{
-												mstudioflexcontroller_t* pflexcontroller = modelPtr->pFlexcontroller((LocalFlexController_t)i);
-												char* flexName = (char*)pEntity->GetFlexControllerName((LocalFlexController_t)i);
-												if (pflexcontroller->max != pflexcontroller->min)
-												{
-													float flex = pEntity->GetFlexWeight((LocalFlexController_t)i);
-													ImGui::SliderFloat(flexName, &flex, pflexcontroller->min, pflexcontroller->max);
-													pEntity->SetFlexWeight((LocalFlexController_t)i, flex);
-												}
-												else
-												{
-													ImGui::LabelText("Flex", "%s", flexName);
-												}
-												break;
-											}
-										}
-										ImGui::SliderInt("Flex Index", &g_DirectorsCutSystem.flexIndex, -1, modelPtr->numflexcontrollers() - 1);
-										if (ImGui::Button("View Target to Camera"))
-										{
-											modelrender->SetViewTarget(modelPtr, pEntity->GetBody(), g_DirectorsCutSystem.engineOrigin);
 										}
 									}
 								}
 								break;
 							}
 						}
-						if (ImGui::Button("Remove"))
+						if (g_DirectorsCutSystem.elementIndex > -1 && g_DirectorsCutSystem.operation >= 0)
 						{
-							delete element;
-							g_DirectorsCutSystem.elements.Remove(g_DirectorsCutSystem.elementIndex);
-							g_DirectorsCutSystem.elementIndex = g_DirectorsCutSystem.elements.Count() - 1;
-							g_DirectorsCutSystem.boneIndex = -1;
-							g_DirectorsCutSystem.nextPoseIndex = -1;
-							g_DirectorsCutSystem.flexIndex = -1;
-						}
-						if (g_DirectorsCutSystem.elementIndex > -1 && g_DirectorsCutSystem.operation > -1)
-						{
-							// Retry for pEntity pointer in case we just removed it
-							element = g_DirectorsCutSystem.elements[g_DirectorsCutSystem.elementIndex];
 							if (element != nullptr)
 							{
-								C_BaseEntity* pEntity = (C_BaseEntity*)element->GetElementPointer();
+								C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
 								if (pEntity != nullptr)
 								{
 									ImGuizmo::SetID(g_DirectorsCutSystem.elementIndex);
@@ -776,9 +880,9 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 									QAngle ang = pEntity->GetAbsAngles();
 									float s = 1.f;
 
-									if (element->GetElementType() == DAG_MODEL)
+									if (element->GetType() == DAG_MODEL)
 									{
-										CModelElement* modelDag = (CModelElement*)element->GetElementPointer();
+										CModelElement* modelDag = (CModelElement*)element->GetPointer();
 										if (modelDag != nullptr)
 										{
 											if (modelDag->IsRagdoll() && g_DirectorsCutSystem.boneIndex >= 0)
@@ -846,40 +950,32 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 							}
 						}
 					}
-					else
-					{
-						ImGui::Text("No elements");
-					}
+					ImGui::End();
 				}
 			}
 
-			ImGui::End();
+			ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
+			ImGuizmo::SetRect(0, 0, windowWidth, windowHeight);
+
+			//if (g_DirectorsCutSystem.drawGrid)
+				//ImGuizmo::DrawGrid(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, g_DirectorsCutSystem.identityMatrix, g_DirectorsCutSystem.gridSize);
+
+			// Obsolete due to middle mouse orbiting
+			//ImGuizmo::ViewManipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.distance, ImVec2(windowWidth - 192, 0), ImVec2(192, 192), 0x10101010);
+
+			// info box in bottom corner
+			ImGui::SetNextWindowPos(ImVec2(windowWidth - 264 - 8, windowHeight - 96 - 8), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(264, 96), ImGuiCond_Always);
+			ImGui::Begin("Info", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoInputs);
+
+			ImGui::Text("Director's Cut");
+			ImGui::Text("Version: %s", g_DirectorsCutSystem.directorcut_version.GetVersion());
+			ImGui::Text("Author: %s", "KiwifruitDev");
+			ImGui::Text("License: %s", "MIT");
+			ImGui::Text("https://twitter.com/SFMDirectorsCut");
 		}
-
-		ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
-		ImGuizmo::SetRect(0, 0, windowWidth, windowHeight);
-
-		if (g_DirectorsCutSystem.drawGrid)
-			ImGuizmo::DrawGrid(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.cameraProjection, g_DirectorsCutSystem.identityMatrix, g_DirectorsCutSystem.gridSize);
-
-		// Obsolete due to middle mouse orbiting
-		//ImGuizmo::ViewManipulate(g_DirectorsCutSystem.cameraView, g_DirectorsCutSystem.distance, ImVec2(windowWidth - 192, 0), ImVec2(192, 192), 0x10101010);
-
-		// info box in bottom corner
-		ImGui::SetNextWindowPos(ImVec2(windowWidth - 264 - 8, windowHeight - 96 - 8), ImGuiCond_Always);
-		ImGui::SetNextWindowSize(ImVec2(264, 96), ImGuiCond_Always);
-		ImGui::Begin("Info", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoInputs);
-
-		ImGui::Text("Director's Cut");
-		ImGui::Text("Version: %s", g_DirectorsCutSystem.directorcut_version.GetVersion());
-		ImGui::Text("Author: %s", "KiwifruitDev");
-		ImGui::Text("License: %s", "MIT");
-		ImGui::Text("https://twitter.com/SFMDirectorsCut");
-	
 		ImGui::End();
-
 		ImGui::EndFrame();
-
 		ImGui::Render();
 		ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
 	}
@@ -1106,16 +1202,16 @@ void CDirectorsCutSystem::Update(float frametime)
 	{
 		if (elementIndex < elements.Count())
 		{
-			CDirectorsCutElement* element = elements[elementIndex];
+			CElementPointer* element = elements[elementIndex];
 			if (element != nullptr)
 			{
-				C_BaseEntity* pEntity = (C_BaseEntity*)element->GetElementPointer();
+				C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
 				if (pEntity != nullptr)
 				{
 					bool shouldMoveGeneric = true;
-					if (element->GetElementType() == DAG_MODEL)
+					if (element->GetType() == DAG_MODEL)
 					{
-						CModelElement* modelDag = (CModelElement*)element->GetElementPointer();
+						CModelElement* modelDag = (CModelElement*)element->GetPointer();
 						if (modelDag != nullptr)
 						{
 							if (modelDag->IsRagdoll() && boneIndex >= 0)
@@ -1159,11 +1255,6 @@ void CDirectorsCutSystem::Update(float frametime)
 									QAngle localAng = poseBoneAngles - worldAng;
 									modelDag->PoseBones(nextPoseIndexTrue, localVec, localAng);
 								}
-								if (needToSetPoseBoneToPivot)
-								{
-									pivot = poseBoneOrigin;
-									needToSetPoseBoneToPivot = false;
-								}
 								modelDag->PopBoneAccess("DirectorsCut");
 							}
 						}
@@ -1187,13 +1278,13 @@ void CDirectorsCutSystem::Update(float frametime)
 	{
 		if (selecting)
 		{
-			if (operation != -1)
+			if (operation != -2)
 			{
-				operation = oldOperation;
-				operation = -1;
+				oldOperation = operation;
+				operation = -2;
 			}
 			// holding down CTRL (selecting) should allow the user to select individual objects
-			float vector = 0.5f;
+			float vector = 0.25f;
 			Vector boundMin = Vector(-vector, -vector, -vector);
 			Vector boundMax = Vector(vector, vector, vector);
 			int colorR = 196;
@@ -1221,21 +1312,21 @@ void CDirectorsCutSystem::Update(float frametime)
 			// loop all models
 			for (int i = 0; i < elements.Count(); i++)
 			{
-				CDirectorsCutElement* element = elements[i];
+				CElementPointer* element = elements[i];
 				if (element != nullptr)
 				{
-					C_BaseEntity* pEntity = (C_BaseEntity*)element->GetElementPointer();
+					C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
 					if (pEntity != nullptr)
 					{
 						if (modelsPhysOrBones == 0)
 						{
 							char modelNameAndIndex[MAXCHAR];
 							sprintf(modelNameAndIndex, "%d", i);
-							switch (element->GetElementType())
+							switch (element->GetType())
 							{
 							case DAG_MODEL:
 							{
-								CModelElement* model = (CModelElement*)element->GetElementPointer();
+								CModelElement* model = (CModelElement*)element->GetPointer();
 								if (model != nullptr)
 									sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, model->GetModelName());
 								break;
@@ -1286,10 +1377,10 @@ void CDirectorsCutSystem::Update(float frametime)
 								}
 							}
 						}
-						else if (element->GetElementType() == DAG_MODEL)
+						else if (element->GetType() == DAG_MODEL)
 						{
 							// draw model locations and names
-							CModelElement* model = (CModelElement*)element->GetElementPointer();
+							CModelElement* model = (CModelElement*)element->GetPointer();
 							if (model != nullptr)
 							{
 								// use the current model
@@ -1425,7 +1516,7 @@ void CDirectorsCutSystem::Update(float frametime)
 				}
 			}
 		}
-		else if (operation != oldOperation)
+		else if (operation == -2)
 		{
 			operation = oldOperation;
 		}
@@ -1434,20 +1525,44 @@ void CDirectorsCutSystem::Update(float frametime)
 		// TODO: make sure bone is in range
 		if (poseIndex != nextPoseIndex && nextPoseIndex >= 0 && elementIndex >= 0 && elementIndex < elements.Count())
 		{
-			CDirectorsCutElement* element = elements[elementIndex];
+			CElementPointer* element = elements[elementIndex];
 			if (element != nullptr)
 			{
-				C_BaseEntity* pEntity = (C_BaseEntity*)element->GetElementPointer();
+				C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
 				if (pEntity != nullptr)
 				{
-					if (element->GetElementType() == DAG_MODEL)
+					if (element->GetType() == DAG_MODEL)
 					{
-						CModelElement* pEntity = (CModelElement*)element->GetElementPointer();
-						if (pEntity != nullptr)
+						CModelElement* pEntity2 = (CModelElement*)element->GetPointer();
+						if (pEntity2 != nullptr)
 						{
-							pEntity->GetBoneForWrite(nextPoseIndex);
+							pEntity2->GetBoneForWrite(nextPoseIndex);
 							poseIndex = nextPoseIndex;
 						}
+					}
+				}
+			}
+		}
+	}
+	// update all light elements
+	for (int i = 0; i < elements.Count(); i++)
+	{
+		CElementPointer* element = elements[i];
+		if (element != nullptr)
+		{
+			C_BaseEntity* pEntity = (C_BaseEntity*)element->GetPointer();
+			if (pEntity != nullptr)
+			{
+				if (element->GetType() == DAG_LIGHT)
+				{
+					CLightElement* pEntity2 = (CLightElement*)element->GetPointer();
+					if (pEntity2 != nullptr)
+					{
+						// get dir, right, and up from angles
+						QAngle angles = pEntity2->GetAbsAngles();
+						Vector dir, right, up;
+						AngleVectors(angles, &dir, &right, &up);
+						pEntity2->UpdateLight(pEntity2->GetAbsOrigin(), dir, right, up, 1000);
 					}
 				}
 			}
@@ -1492,24 +1607,24 @@ CModelElement* MakeRagdoll(CModelElement* dag, int index)
 				}
 				dag->PopBoneAccess("DirectorsCut_FindChildren");
 			}
-			g_DirectorsCutSystem.elements[index]->SetElementPointer(ragdoll);
+			g_DirectorsCutSystem.elements[index]->SetPointer(ragdoll);
 			return ragdoll;
 		}
 	}
 	return nullptr;
 }
 
-CDirectorsCutElement* CreateElement(bool add, bool setIndex, DAG_ type)
+CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type)
 {
-	KeyValues* kv = new KeyValues("CDirectorsCutElement");
+	KeyValues* kv = new KeyValues("CElementPointer");
 
 	switch (type)
 	{
 	case DAG_MODEL:
-		kv->SetString("modelName", g_DirectorsCutSystem.modelName.c_str());
+		kv->SetString("modelName", cvar_dx_model_name.GetString());
 		break;
 	case DAG_LIGHT:
-		kv->SetString("lightTexture", g_DirectorsCutSystem.lightTexture.c_str());
+		kv->SetString("lightTexture", cvar_dx_light_texture_name.GetString());
 		break;
 	}
 
@@ -1517,7 +1632,7 @@ CDirectorsCutElement* CreateElement(bool add, bool setIndex, DAG_ type)
 	kv->SetFloat("pivot_y", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.y : 0);
 	kv->SetFloat("pivot_z", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.z : 0);
 
-	CDirectorsCutElement* newElement = new CDirectorsCutElement(type, kv);
+	CElementPointer* newElement = new CElementPointer(type, kv);
 	if (newElement != nullptr)
 	{
 		if (add)

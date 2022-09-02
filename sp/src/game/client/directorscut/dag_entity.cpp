@@ -15,7 +15,7 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-CDirectorsCutElement::CDirectorsCutElement()
+CElementPointer::CElementPointer()
 {
 	C_BaseEntity* pEntity = new C_BaseEntity();
 	if (!pEntity)
@@ -23,12 +23,12 @@ CDirectorsCutElement::CDirectorsCutElement()
 		Msg("Director's Cut: Failed to create generic dag\n");
 		return;
 	}
-	SetElementPointer(pEntity);
+	SetPointer(pEntity);
 }
 
-CDirectorsCutElement::CDirectorsCutElement(DAG_ type, KeyValues* params)
+CElementPointer::CElementPointer(DAG_ type, KeyValues* params)
 {
-	SetElementType(type);
+	SetType(type);
 	Vector pivot = Vector(params->GetFloat("pivot_x"), params->GetFloat("pivot_y"), params->GetFloat("pivot_z"));
 	switch (type)
 	{
@@ -86,20 +86,20 @@ CDirectorsCutElement::CDirectorsCutElement(DAG_ type, KeyValues* params)
 			break;
 		}
 
-		SetElementPointer(pEntity);
+		SetPointer(pEntity);
 		break;
 	}
 	case DAG_LIGHT:
 	{
 		char* texture = (char*)params->GetString("lightTexture");
-		CLightCustomEffect* pEntity = new CLightCustomEffect();
+		CLightElement* pEntity = new CLightElement();
 		if (!pEntity)
 		{
 			Msg("Director's Cut: Failed to create light with texture %s\n", texture);
 			break;
 		}
 		pEntity->SetAbsOrigin(pivot);
-		SetElementPointer(pEntity);
+		SetPointer(pEntity);
 		break;
 	}
 	case DAG_CAMERA:
@@ -111,7 +111,7 @@ CDirectorsCutElement::CDirectorsCutElement(DAG_ type, KeyValues* params)
 			break;
 		}
 		pEntity->SetAbsOrigin(pivot);
-		SetElementPointer(pEntity);
+		SetPointer(pEntity);
 		break;
 	}
 	default:
@@ -123,13 +123,13 @@ CDirectorsCutElement::CDirectorsCutElement(DAG_ type, KeyValues* params)
 			break;
 		}
 		pEntity->SetAbsOrigin(pivot);
-		SetElementPointer(pEntity);
+		SetPointer(pEntity);
 		break;
 	}
 	}
 }
 
-CDirectorsCutElement::~CDirectorsCutElement()
+CElementPointer::~CElementPointer()
 {
 	C_BaseEntity* pEntity = (C_BaseEntity*)pElement;
 	if (pEntity != nullptr)
@@ -138,22 +138,22 @@ CDirectorsCutElement::~CDirectorsCutElement()
 	}
 }
 
-void CDirectorsCutElement::SetElementType(DAG_ type)
+void CElementPointer::SetType(DAG_ type)
 {
 	elementType = type;
 }
 
-DAG_ CDirectorsCutElement::GetElementType()
+DAG_ CElementPointer::GetType()
 {
 	return elementType;
 }
 
-void CDirectorsCutElement::SetElementPointer(void* pElement)
+void CElementPointer::SetPointer(void* pElement)
 {
 	this->pElement = pElement;
 }
 
-void* CDirectorsCutElement::GetElementPointer()
+void* CElementPointer::GetPointer()
 {
 	return pElement;
 }
@@ -419,12 +419,12 @@ CModelElement* CModelElement::BecomeRagdollOnClient()
 	return pRagdoll;
 }
 
-CLightCustomEffect::CLightCustomEffect()
+CLightElement::CLightElement()
 {
 	TurnOn();
 }
 
-CLightCustomEffect::~CLightCustomEffect()
+CLightElement::~CLightElement()
 {
 	if (m_FlashlightHandle != CLIENTSHADOW_INVALID_HANDLE)
 	{
@@ -433,17 +433,7 @@ CLightCustomEffect::~CLightCustomEffect()
 	}
 }
 
-void CLightCustomEffect::Simulate()
-{
-	// get dir, right, and up from angles
-	QAngle angles = GetAbsAngles();
-	Vector dir, right, up;
-	AngleVectors(angles, &dir, &right, &up);
-	UpdateLight(GetAbsOrigin(), dir, right, up, 1000);
-	BaseClass::Simulate();
-}
-
-void CLightCustomEffect::UpdateLight(const Vector& vecPos, const Vector& vecDir, const Vector& vecRight, const Vector& vecUp, int nDistance)
+void CLightElement::UpdateLight(const Vector& vecPos, const Vector& vecDir, const Vector& vecRight, const Vector& vecUp, int nDistance)
 {
 	if (IsOn() == false)
 		return;

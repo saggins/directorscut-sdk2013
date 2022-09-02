@@ -107,6 +107,10 @@ mklink /J "C:\Program Files (x86)\Steam\steamapps\sourcemods\directorscut" ..\..
 
 ## Screenshots
 
+### v0.1.4
+
+![v0.1.4](https://i.imgur.com/KsozIHQ.png)
+
 ### v0.1.3
 
 ![v0.1.3](https://i.imgur.com/U7IQifr.png)
