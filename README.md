@@ -1,3 +1,8 @@
+# OBSOLETE:
+Succeeded by [TeamPopplio/SFMDX](https://github.com/TeamPopplio/SFMDX).
+
+This repository has been archived as development moves to S&box.
+
 # Director's Cut
 
 Rebuilding the Source Filmmaker from scratch. By the community, for the community.
