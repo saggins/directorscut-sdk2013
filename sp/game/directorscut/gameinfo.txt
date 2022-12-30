@@ -30,6 +30,7 @@
 		// 
 		SearchPaths
 		{
+			game				|gameinfo_path|content/earliest/*
 			// First, mount all user customizations.  This will search for VPKs and subfolders
 			// and mount them in alphabetical order.  The easiest way to distribute a mod is to
 			// pack up the custom content into a VPK.  To "install" a mod, just drop it in this
@@ -53,7 +54,7 @@
 			// to the "game" path go.
 			game+game_write		|gameinfo_path|
 			
-			game+mod			|gameinfo_path|content/*
+			game+mod			|gameinfo_path|content/early
 			
 			// Get our shared mapbase files.
 			// They should be right next to this mod.
@@ -92,7 +93,13 @@
 			game				|all_source_engine_paths|hl2
 			platform			|all_source_engine_paths|platform
 
+			game				|gameinfo_path|content/late/*
+
 			// tf2 shared content mount
+			game				"C:/Program Files (x86)/Steam/steamapps/common/Team Fortress 2/tf/tf2_textures.vpk"
+			game				"C:/Program Files (x86)/Steam/steamapps/common/Team Fortress 2/tf"
+
+			// sfm shared content mount
 			game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/tf"
 			game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/tf_movies"
 			game				"C:/Program Files (x86)/Steam/steamapps/common/SourceFilmmaker/usermod"
@@ -101,6 +108,8 @@
 			game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/tf_movies"
 			game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/usermod"
 			game				"D:/SteamLibrary/steamapps/common/SourceFilmmaker/game/workshop"
+
+			game				|gameinfo_path|content/latest/*
 		}
 	}
 }

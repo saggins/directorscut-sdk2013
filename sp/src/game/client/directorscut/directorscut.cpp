@@ -26,11 +26,16 @@
 #include "view_scene.h"
 #include "in_buttons.h"
 #include "clientsteamcontext.h"
+#include "filesystem.h"
+#include "dmxloader/dmxloader.h"
+#include "dmxloader/dmxelement.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 CDirectorsCutSystem g_DirectorsCutSystem;
+
+OPENFILENAME ofn;
 
 CDirectorsCutSystem &DirectorsCutGameSystem()
 {
@@ -39,12 +44,16 @@ CDirectorsCutSystem &DirectorsCutGameSystem()
 
 CModelElement* MakeRagdoll(CModelElement* dag, int index);
 CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type);
+CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type, char* name, KeyValues* kv);
+void UnserializeKeyValuesDX(KeyValues* kv, bool append = false);
+KeyValues* SerializeKeyValuesDX();
+void SaveToKeyValues(char* path);
+void LoadFromKeyValues(char* path, bool append = false);
 
 ConVar cvar_imgui_enabled("dx_imgui_enabled", "1", FCVAR_ARCHIVE, "Enable ImGui");
 ConVar cvar_imgui_input_enabled("dx_imgui_input_enabled", "1", FCVAR_ARCHIVE, "Capture ImGui input");
 ConVar cvar_dx_zoom_distance("dx_zoom_distance", "5.0f", FCVAR_ARCHIVE, "Default zoom distance");
 ConVar cvar_dx_orbit_sensitivity("dx_orbit_sensitivity", "0.1f", FCVAR_ARCHIVE, "Middle click orbit sensitivity");
-ConVar cvar_dx_pan_sensitivity("dx_pan_sensitivity", "0.1f", FCVAR_ARCHIVE, "Shift + middle click pan sensitivity");
 
 ConCommand cmd_imgui_toggle("dx_imgui_toggle", [](const CCommand& args) {
 	cvar_imgui_enabled.SetValue(!cvar_imgui_enabled.GetBool());
@@ -70,11 +79,11 @@ static ImGuizmo::MODE mCurrentGizmoMode(ImGuizmo::WORLD);
 void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 {
 	// Initialization
-	bool firstFrame = false;
+	//bool firstFrame = false;
 	if (g_DirectorsCutSystem.firstEndScene)
 	{
 		g_DirectorsCutSystem.firstEndScene = false;
-		firstFrame = true;
+		//firstFrame = true;
 		ImGui_ImplDX9_Init(p_pDevice);
 	}
 	// Only render Imgui when enabled
@@ -107,18 +116,105 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 			if (ImGui::BeginMenu("File"))
 			{
 				bool dummy = false;
-				if (ImGui::MenuItem("New", NULL, &dummy, false))
+				if (ImGui::MenuItem("New", NULL))
 				{
+					KeyValues* kv = new KeyValues("DirectorsCut");
+					UnserializeKeyValuesDX(kv);
+					kv->deleteThis();
+					g_DirectorsCutSystem.SetDefaultSettings();
 				}
-				if (ImGui::MenuItem("Open", NULL, &dummy, false))
+				if (ImGui::MenuItem("Open..."))
 				{
-
+					// TODO: make this not so cluttered
+					char szFile[MAX_PATH] = { 0 };
+					ZeroMemory(&ofn, sizeof(ofn));
+					ofn.lStructSize = sizeof(ofn);
+					ofn.hwndOwner = NULL;
+					ofn.lpstrFile = szFile;
+					ofn.nMaxFile = sizeof(szFile);
+					ofn.lpstrFilter = "KeyValues (*.vdf)\0*.kv2\0";
+					ofn.nFilterIndex = 1;
+					ofn.lpstrFileTitle = NULL;
+					ofn.nMaxFileTitle = 0;
+					ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+					// pull from exe path (wapi)
+					char exePath[MAX_PATH];
+					GetModuleFileName(NULL, exePath, MAX_PATH);
+					char* exePathEnd = strrchr(exePath, '\\');
+					*exePathEnd = '\0';
+					ofn.lpstrInitialDir = exePath;
+					if (GetOpenFileName(&ofn))
+					{
+						sprintf(g_DirectorsCutSystem.savePath, "%s", ofn.lpstrFile);
+						LoadFromKeyValues( ofn.lpstrFile );
+						g_DirectorsCutSystem.savedOnce = true;
+					}
 				}
-				if (ImGui::MenuItem("Save", NULL, &dummy, false))
+				if (ImGui::MenuItem("Append..."))
 				{
+					// TODO: make this not so cluttered
+					char szFile[MAX_PATH] = { 0 };
+					ZeroMemory(&ofn, sizeof(ofn));
+					ofn.lStructSize = sizeof(ofn);
+					ofn.hwndOwner = NULL;
+					ofn.lpstrFile = szFile;
+					ofn.nMaxFile = sizeof(szFile);
+					ofn.lpstrFilter = "KeyValues (*.vdf)\0*.kv2\0";
+					ofn.nFilterIndex = 1;
+					ofn.lpstrFileTitle = NULL;
+					ofn.nMaxFileTitle = 0;
+					ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+					// pull from exe path (wapi)
+					char exePath[MAX_PATH];
+					GetModuleFileName(NULL, exePath, MAX_PATH);
+					char* exePathEnd = strrchr(exePath, '\\');
+					*exePathEnd = '\0';
+					ofn.lpstrInitialDir = exePath;
+					if (GetOpenFileName(&ofn))
+					{
+						sprintf(g_DirectorsCutSystem.savePath, "%s", ofn.lpstrFile);
+						LoadFromKeyValues(ofn.lpstrFile, true);
+						g_DirectorsCutSystem.savedOnce = true;
+					}
 				}
-				if (ImGui::MenuItem("Save As", NULL, &dummy, false))
+				if (ImGui::MenuItem("Save", NULL, &dummy, g_DirectorsCutSystem.savedOnce))
 				{
+					SaveToKeyValues(g_DirectorsCutSystem.savePath);
+				}
+				if (ImGui::MenuItem("Save As..."))
+				{
+					// another long windows api call
+					char szFile[MAX_PATH] = { 0 };
+					ZeroMemory(&ofn, sizeof(ofn));
+					ofn.lStructSize = sizeof(ofn);
+					ofn.hwndOwner = NULL;
+					ofn.lpstrFile = szFile;
+					ofn.nMaxFile = sizeof(szFile);
+					ofn.lpstrFilter = "KeyValues (*.vdf)\0*.kv2\0";
+					ofn.nFilterIndex = 1;
+					ofn.lpstrFileTitle = NULL;
+					ofn.nMaxFileTitle = 0;
+					ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+					// pull from exe path (wapi)
+					char exePath[MAX_PATH];
+					GetModuleFileName(NULL, exePath, MAX_PATH);
+					char* exePathEnd = strrchr(exePath, '\\');
+					*exePathEnd = '\0';
+					ofn.lpstrInitialDir = exePath;
+					if (GetSaveFileName(&ofn))
+					{
+						sprintf(g_DirectorsCutSystem.savePath, "%s", ofn.lpstrFile);
+						SaveToKeyValues(ofn.lpstrFile);
+						g_DirectorsCutSystem.savedOnce = true;
+					}
+				}
+				if (ImGui::MenuItem("Reload", NULL, &dummy, g_DirectorsCutSystem.savedOnce))
+				{
+					LoadFromKeyValues(g_DirectorsCutSystem.savePath);
+				}
+				if (ImGui::MenuItem("Reappend", NULL, &dummy, g_DirectorsCutSystem.savedOnce))
+				{
+					LoadFromKeyValues(g_DirectorsCutSystem.savePath, true);
 				}
 				ImGui::EndMenu();
 			}
@@ -325,7 +421,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 						{
 							CModelElement* model = (CModelElement*)element->GetPointer();
 							if (model != nullptr)
-								sprintf(name, "%s (%s)", name, model->GetModelName());
+								sprintf(name, "%s (%s)", name, STRING(model->GetModelPtr()->pszName()));
 							break;
 						}
 						case DAG_LIGHT:
@@ -423,6 +519,24 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 														g_DirectorsCutSystem.boneIndex = 0;
 														g_DirectorsCutSystem.nextPoseIndex = -1;
 														MakeRagdoll(pEntity, g_DirectorsCutSystem.elementIndex);
+													}
+													int eyes = pEntity->LookupAttachment("eyes");
+													if (eyes > 0)
+													{
+														if (ImGui::MenuItem("View Target to Camera"))
+														{
+															Vector local;
+															// get local position of camera
+															VectorSubtract(g_DirectorsCutSystem.engineOrigin, modelPtr->eyeposition(), local);
+															pEntity->SetViewOffset(local);
+														}
+														if (ImGui::MenuItem("View Target to Pivot"))
+														{
+															Vector local;
+															// get local position of pivot
+															VectorSubtract(g_DirectorsCutSystem.pivot, modelPtr->eyeposition(), local);
+															pEntity->SetViewOffset(local);
+														}
 													}
 												}
 											}
@@ -752,7 +866,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 							if (g_DirectorsCutSystem.elementIndex < 0)
 								g_DirectorsCutSystem.elementIndex = 0;
 
-							ImGui::LabelText("Element Index", "%d", g_DirectorsCutSystem.elementIndex);
+							ImGui::SliderInt("Element Index", &g_DirectorsCutSystem.elementIndex, 0, g_DirectorsCutSystem.elements.Count() - 1);
 
 							char* name = element->name;
 							if(ImGui::InputText("Element Name", name, CHAR_MAX))
@@ -925,8 +1039,8 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 			}
 
 			// Reset camera view to accommodate new distance
-			if (viewDirty || firstFrame)
-			{
+			//if (viewDirty || firstFrame)
+			//{
 				float eye[3];
 				eye[0] = cosf(g_DirectorsCutSystem.camYAngle) * cosf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
 				eye[1] = sinf(g_DirectorsCutSystem.camXAngle) * g_DirectorsCutSystem.distance;
@@ -934,8 +1048,8 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 				float at[] = { 0.f, 0.f, 0.f };
 				float up[] = { 0.f, 1.f, 0.f };
 				g_DirectorsCutSystem.LookAt(eye, at, up, g_DirectorsCutSystem.cameraView);
-				firstFrame = false;
-			}
+				//firstFrame = false;
+			//}
 
 			// Gizmos
 			if (g_DirectorsCutSystem.operation >= 0)
@@ -1120,7 +1234,7 @@ void APIENTRY EndScene(LPDIRECT3DDEVICE9 p_pDevice)
 							{
 								CModelElement* model = (CModelElement*)pointer;
 								if (model != nullptr)
-									sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, model->GetModelName());
+									sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, STRING(model->GetModelPtr()->pszName()));
 								break;
 							}
 							case DAG_LIGHT:
@@ -1258,7 +1372,8 @@ void CDirectorsCutSystem::SetupEngineView(Vector& origin, QAngle& angles, float&
 	}
 }
 
-void CDirectorsCutSystem::PostInit()
+
+void CDirectorsCutSystem::SetDefaultSettings()
 {
 	// set default values
 	sprintf(modelName, "models/alyx.mdl");
@@ -1298,6 +1413,37 @@ void CDirectorsCutSystem::PostInit()
 	{
 		hoveringInfo[i] = newHoveringInfo[i];
 	}
+	distance = 100.f;
+	fov = 93;
+	fovAdjustment = 2;
+	playerFov;
+	camYAngle = 165.f / 180.f * M_PI_F;
+	camXAngle = 32.f / 180.f * M_PI_F;
+	gridSize = 500.f;
+	currentTimeScale = 1.f;
+	timeScale = 1.f;
+	elementIndex = -1;
+	nextElementIndex = -1;
+	boneIndex = -1;
+	poseIndex = -1;
+	nextPoseIndex = -1;
+	flexIndex = -1;
+	operation = 2;
+	oldOperation = 2;
+	hoveringInfo[3];
+	useSnap = false;
+	orthographic = false;
+	selecting = false;
+	justSetPivot = false;
+	pivotMode = false;
+	spawnAtPivot = false;
+	inspectorDocked = true;
+	savedOnce = false;
+}
+
+void CDirectorsCutSystem::PostInit()
+{
+	SetDefaultSettings();
 	// Hook Direct3D in hl2.exe
 	Msg("Director's Cut: Hooking Direct3D...\n");
 	HWND hwnd = FindWindowA("Valve001", NULL);
@@ -1570,7 +1716,7 @@ void CDirectorsCutSystem::Update(float frametime)
 								{
 									CModelElement* model = (CModelElement*)element->GetPointer();
 									if (model != nullptr)
-										sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, model->GetModelName());
+										sprintf(modelNameAndIndex, "%s (%s)", modelNameAndIndex, STRING(model->GetModelPtr()->pszName()));
 									break;
 								}
 								case DAG_LIGHT:
@@ -1764,6 +1910,7 @@ void CDirectorsCutSystem::Update(float frametime)
 												}
 											}
 											model->PopBoneAccess("DirectorsCut_PostRender");
+											break;
 										}
 									}
 								}
@@ -1833,13 +1980,420 @@ void CDirectorsCutSystem::Update(float frametime)
 	}
 }
 
+void FromKeyToBoolArray(KeyValues* parent, char* key, int max, bool* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		KeyValues* value = child->FindKey(key);
+		array[i] = value->GetBool();
+	}
+}
+
+void FromBoolArrayToKey(KeyValues* parent, char* key, int max, bool* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		child->SetBool(key, array[i]);
+	}
+}
+
+void FromKeyToIntArray(KeyValues* parent, char* key, int max, int* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		KeyValues* value = child->FindKey(key);
+		array[i] = value->GetInt();
+	}
+}
+
+void FromIntArrayToKey(KeyValues* parent, char* key, int max, int* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		child->SetInt(key, array[i]);
+	}
+}
+
+void FromKeyToFloatArray(KeyValues* parent, char* key, int max, float* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		KeyValues* value = child->FindKey(key, true);
+		array[i] = value->GetFloat();
+	}
+}
+
+void FromFloatArrayToKey(KeyValues* parent, char* key, int max, float* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		child->SetFloat(key, array[i]);
+	}
+}
+
+void FromKeyToVector(KeyValues* parent, char* key, Vector &vector)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	vector.x = child->FindKey("x", true)->GetFloat();
+	vector.y = child->FindKey("y", true)->GetFloat();
+	vector.z = child->FindKey("z", true)->GetFloat();
+}
+
+void FromVectorToKey(KeyValues* parent, char* key, Vector vector)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	child->SetFloat("x", vector.x);
+	child->SetFloat("y", vector.y);
+	child->SetFloat("z", vector.z);
+}
+
+void FromKeyToVectorArray(KeyValues* parent, char* key, int max, Vector* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		FromKeyToVector(child, key, array[i]);
+	}
+}
+
+void FromVectorArrayToKey(KeyValues* parent, char* key, int max, Vector* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		FromVectorToKey(child, key, array[i]);
+	}
+}
+
+void FromKeyToAngles(KeyValues* parent, char* key, QAngle &vector)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	vector.x = child->FindKey("x", true)->GetFloat();
+	vector.y = child->FindKey("y", true)->GetFloat();
+	vector.z = child->FindKey("z", true)->GetFloat();
+}
+
+void FromAnglesToKey(KeyValues* parent, char* key, QAngle vector)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	child->SetFloat("x", vector.x);
+	child->SetFloat("y", vector.y);
+	child->SetFloat("z", vector.z);
+}
+
+void FromKeyToAnglesArray(KeyValues* parent, char* key, int max, QAngle* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		FromKeyToAngles(child, key, array[i]);
+	}
+}
+
+void FromAnglesArrayToKey(KeyValues* parent, char* key, int max, QAngle* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		FromAnglesToKey(child, key, array[i]);
+	}
+}
+
+void FromKeyToQuaternion(KeyValues* parent, char* key, Quaternion &vector)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	vector.x = child->FindKey("x", true)->GetFloat();
+	vector.y = child->FindKey("y", true)->GetFloat();
+	vector.z = child->FindKey("z", true)->GetFloat();
+	vector.w = child->FindKey("w", true)->GetFloat();
+}
+
+void FromQuaternionToKey(KeyValues* parent, char* key, Quaternion vector)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	child->SetFloat("x", vector.x);
+	child->SetFloat("y", vector.y);
+	child->SetFloat("z", vector.z);
+	child->SetFloat("w", vector.w);
+}
+
+void FromKeyToQuaternionArray(KeyValues* parent, char* key, int max, Quaternion* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		FromKeyToQuaternion(child, key, array[i]);
+	}
+}
+
+void FromQuaternionArrayToKey(KeyValues* parent, char* key, int max, Quaternion* array)
+{
+	KeyValues* child = parent->FindKey(key, true);
+	for (int i = 0; i < max; i++)
+	{
+		char key[CHAR_MAX];
+		sprintf(key, "%d", i);
+		FromQuaternionToKey(child, key, array[i]);
+	}
+}
+
+void UnserializeKeyValuesDX(KeyValues* kv, bool append)
+{
+	// Check format type
+	KeyValues* version = kv->FindKey("version", true);
+	if (version->GetInt("major") != g_DirectorsCutSystem.directorcut_version.m_major)
+	{
+		Warning("DirectorsCut: UnserializeKeyValuesDX: Version mismatch! Expected major %d, got %d\n", g_DirectorsCutSystem.directorcut_version.m_major, version->GetInt());
+		return;
+	}
+	if(version->GetInt("minor") != g_DirectorsCutSystem.directorcut_version.m_minor)
+	{
+		Warning("DirectorsCut: UnserializeKeyValuesDX: Version mismatch! Expected minor %d, got %d\n", g_DirectorsCutSystem.directorcut_version.m_minor, version->GetInt());
+		return;
+	}
+	// patches will be ignored
+	// Load session	data
+	KeyValues* elements = kv->FindKey("session", true);
+	if (elements != nullptr)
+	{
+		if (!append)
+		{
+			for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
+			{
+				delete g_DirectorsCutSystem.elements[i];
+			}
+			g_DirectorsCutSystem.elements.RemoveAll();
+		}
+		for (KeyValues* element = elements->GetFirstSubKey(); element != nullptr; element = element->GetNextKey())
+		{
+			// Get element type
+			int type = element->GetInt("type");
+			DAG_ dagType = DAG_NONE;
+			switch (type)
+			{
+			case 0:
+				dagType = DAG_MODEL;
+				break;
+			case 1:
+				dagType = DAG_LIGHT;
+				break;
+			case 2:
+				dagType = DAG_CAMERA;
+				break;
+			}
+			// Get element name
+			char* name = (char*)element->GetString("name");
+			// Get element data
+			KeyValues* data = element->FindKey("data", true);
+			// Create element
+			CElementPointer* elementPtr = CreateElement(false, false, dagType, name, data);
+			if (element == nullptr)
+			{
+				Msg("Director's Cut: Failed to create element %s\n", name);
+				continue;
+			}
+			// Add element to list
+			g_DirectorsCutSystem.elements.AddToTail(elementPtr);
+		}
+	}
+	KeyValues* settings = kv->FindKey("settings", true);
+	if(settings != nullptr)
+	{
+		FromKeyToBoolArray(settings, "windowVisibilities", 2, g_DirectorsCutSystem.windowVisibilities);
+		FromKeyToFloatArray(settings, "cameraMatrix", 16, g_DirectorsCutSystem.cameraView);
+		FromKeyToFloatArray(settings, "cameraProjection", 16, g_DirectorsCutSystem.cameraProjection);
+		FromKeyToFloatArray(settings, "identityMatrix", 16, g_DirectorsCutSystem.identityMatrix);
+		FromKeyToFloatArray(settings, "snap", 3, g_DirectorsCutSystem.snap);
+		FromKeyToVector(settings, "pivot", g_DirectorsCutSystem.pivot);
+		sprintf(g_DirectorsCutSystem.modelName, "%s", settings->GetString("modelName"));
+		sprintf(g_DirectorsCutSystem.lightTexture, "%s", settings->GetString("lightTexture"));
+		g_DirectorsCutSystem.operation = settings->GetInt("operation");
+		g_DirectorsCutSystem.useSnap = settings->GetInt("useSnap");
+		g_DirectorsCutSystem.orthographic = settings->GetInt("orthographic");
+		g_DirectorsCutSystem.pivotMode = settings->GetInt("pivotMode");
+		g_DirectorsCutSystem.spawnAtPivot = settings->GetInt("spawnAtPivot");
+		g_DirectorsCutSystem.inspectorDocked = settings->GetInt("inspectorDocked");
+		g_DirectorsCutSystem.gotInput = settings->GetInt("gotInput");
+		g_DirectorsCutSystem.distance = settings->GetFloat("distance");
+		g_DirectorsCutSystem.fov = settings->GetFloat("fov");
+		g_DirectorsCutSystem.fovAdjustment = settings->GetFloat("fovAdjustment");
+		g_DirectorsCutSystem.playerFov = settings->GetFloat("playerFov");
+		g_DirectorsCutSystem.camYAngle = settings->GetFloat("camYAngle");
+		g_DirectorsCutSystem.camXAngle = settings->GetFloat("camXAngle");
+		g_DirectorsCutSystem.gridSize = settings->GetFloat("gridSize");
+		g_DirectorsCutSystem.currentTimeScale = settings->GetFloat("currentTimeScale");
+		g_DirectorsCutSystem.timeScale = settings->GetFloat("timeScale");
+	}
+}
+
+void LoadFromKeyValues(char* path, bool append)
+{
+	// Load file
+	KeyValues* kv = new KeyValues("DirectorsCut");
+	kv->LoadFromFile(g_pFullFileSystem, path, NULL);
+	UnserializeKeyValuesDX(kv, append);
+	kv->deleteThis();
+}
+
+KeyValues* SerializeKeyValuesDX()
+{
+	KeyValues* kv = new KeyValues("DirectorsCut");
+	KeyValues* version = kv->FindKey("version", true);
+	version->SetInt("major", g_DirectorsCutSystem.directorcut_version.m_major);
+	version->SetInt("minor", g_DirectorsCutSystem.directorcut_version.m_minor);
+	version->SetInt("patch", g_DirectorsCutSystem.directorcut_version.m_patch);
+	// Save session data
+	KeyValues* elements = kv->FindKey("session", true);
+	for (int i = 0; i < g_DirectorsCutSystem.elements.Count(); i++)
+	{
+		// Get element
+		CElementPointer* element = g_DirectorsCutSystem.elements[i];
+		KeyValues* elementKey = elements->CreateNewKey();
+		int type = -1;
+		switch (element->GetType())
+		{
+		case DAG_MODEL:
+			type = 0;
+			break;
+		case DAG_LIGHT:
+			type = 1;
+			break;
+		case DAG_CAMERA:
+			type = 2;
+			break;
+		}
+		elementKey->SetInt("type", type);
+		elementKey->SetString("name", element->name);
+		KeyValues* data = elementKey->FindKey("data", true);
+		C_BaseEntity* genericEntity = (C_BaseEntity*)element->GetPointer();
+		if(genericEntity == nullptr)
+			continue;
+		Vector origin = genericEntity->GetAbsOrigin();
+		data->SetFloat("pivotX", origin.x);
+		data->SetFloat("pivotY", origin.y);
+		data->SetFloat("pivotZ", origin.z);
+		FromAnglesToKey(data, "angles", (QAngle)genericEntity->GetAbsAngles());
+		// Save element data
+		switch(element->GetType())
+		{
+		case DAG_MODEL:
+			{
+				CModelElement* model = (CModelElement*)element->GetPointer();
+				if(model == nullptr)
+					continue;
+				data->SetString("modelName", STRING(model->GetModelPtr()->pszName()));
+				CStudioHdr* modelPtr = model->GetModelPtr();
+				if (modelPtr == nullptr)
+					continue;
+				FromVectorArrayToKey(data, "posadds", modelPtr->numbones(), model->posadds);
+				FromAnglesArrayToKey(data, "anglehelper", modelPtr->numbones(), model->anglehelper);
+				FromFloatArrayToKey(data, "forcedFlexes", modelPtr->numflexcontrollers(), model->forcedFlexes);
+				// TODO: physics objects
+				break;
+			}
+		case DAG_LIGHT:
+			{
+				CLightElement* model = (CLightElement*)element->GetPointer();
+				if (model == nullptr)
+					continue;
+				// TODO: lights
+				data->SetString("lightTexture", "");
+				break;
+			}
+		case DAG_CAMERA:
+			{
+				CCameraElement* model = (CCameraElement*)element->GetPointer();
+				if (model == nullptr)
+					continue;
+				// TODO: cameras
+				break;
+			}
+		}
+	}
+	KeyValues* settings = kv->FindKey("settings", true);
+	FromBoolArrayToKey(settings, "windowVisibilities", 2, g_DirectorsCutSystem.windowVisibilities);
+	FromFloatArrayToKey(settings, "cameraMatrix", 16, g_DirectorsCutSystem.cameraView);
+	FromFloatArrayToKey(settings, "cameraProjection", 16, g_DirectorsCutSystem.cameraProjection);
+	FromFloatArrayToKey(settings, "identityMatrix", 16, g_DirectorsCutSystem.identityMatrix);
+	FromFloatArrayToKey(settings, "snap", 3, g_DirectorsCutSystem.snap);
+	FromVectorToKey(settings, "pivot", g_DirectorsCutSystem.pivot);
+	settings->SetString("modelName", g_DirectorsCutSystem.modelName);
+	settings->SetString("lightTexture", g_DirectorsCutSystem.lightTexture);
+	settings->SetInt("operation", g_DirectorsCutSystem.operation);
+	settings->SetInt("useSnap", g_DirectorsCutSystem.useSnap);
+	settings->SetInt("orthographic", g_DirectorsCutSystem.orthographic);
+	settings->SetInt("pivotMode", g_DirectorsCutSystem.pivotMode);
+	settings->SetInt("spawnAtPivot", g_DirectorsCutSystem.spawnAtPivot);
+	settings->SetInt("inspectorDocked", g_DirectorsCutSystem.inspectorDocked);
+	settings->SetInt("gotInput", g_DirectorsCutSystem.gotInput);
+	settings->SetFloat("distance", g_DirectorsCutSystem.distance);
+	settings->SetFloat("fov", g_DirectorsCutSystem.fov);
+	settings->SetFloat("fovAdjustment", g_DirectorsCutSystem.fovAdjustment);
+	settings->SetFloat("playerFov", g_DirectorsCutSystem.playerFov);
+	settings->SetFloat("camYAngle", g_DirectorsCutSystem.camYAngle);
+	settings->SetFloat("camXAngle", g_DirectorsCutSystem.camXAngle);
+	settings->SetFloat("gridSize", g_DirectorsCutSystem.gridSize);
+	settings->SetFloat("currentTimeScale", g_DirectorsCutSystem.currentTimeScale);
+	settings->SetFloat("timeScale", g_DirectorsCutSystem.timeScale);
+	return kv;
+}
+
+void SaveToKeyValues(char* path)
+{
+	KeyValues* kv = SerializeKeyValuesDX();
+	kv->SaveToFile(g_pFullFileSystem, path, "MOD");
+	kv->deleteThis();
+}
+
+void ImportSFMSession(char* path, int frame)
+{
+	// unfinished SFM import code
+	// there's a temporary "hack" to import sessions for now
+	// use SFM SOCK (sfm bridge)
+	DECLARE_DMX_CONTEXT();
+	CDmxElement* DMX = (CDmxElement*)DMXAlloc(50000000);
+	CUtlBuffer buf;
+	if (UnserializeDMX(path, "MOD", false, &DMX))
+	{
+		
+	}
+}
+
 CModelElement* MakeRagdoll(CModelElement* dag, int index)
 {
 	if (index >= g_DirectorsCutSystem.elements.Count() || index < 0)
 		return nullptr;
 	if (modelinfo->GetVCollide(dag->GetModelIndex()) == nullptr)
 	{
-		Msg("Director's Cut: Model %s has no vcollide\n", dag->GetModelName());
+		Msg("Director's Cut: Model %s has no vcollide\n", STRING(dag->GetModelPtr()->pszName()));
 		return nullptr;
 	}
 	CStudioHdr* modelPtr = dag->GetModelPtr();
@@ -1882,7 +2436,7 @@ CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type)
 {
 	// using keyvalues here as parameters may differ between types
 	// also futureproofs new element types
-	KeyValues* kv = new KeyValues("DirectorsCut_CElementPointer");
+	KeyValues* kv = new KeyValues("DirectorsCutElement");
 
 	switch (type)
 	{
@@ -1898,9 +2452,19 @@ CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type)
 	kv->SetFloat("pivotY", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.y : 0);
 	kv->SetFloat("pivotZ", g_DirectorsCutSystem.spawnAtPivot ? g_DirectorsCutSystem.pivot.z : 0);
 
+	CElementPointer* element = CreateElement(add, setIndex, type, "", kv);
+	kv->deleteThis();
+	if (element != nullptr)
+		return element;
+	return NULL;
+}
+
+CElementPointer* CreateElement(bool add, bool setIndex, DAG_ type, char* name, KeyValues* kv)
+{
 	CElementPointer* newElement = new CElementPointer(type, kv);
 	if (newElement != nullptr)
 	{
+		sprintf(newElement->name, "%s", name);
 		if (add)
 		{
 			g_DirectorsCutSystem.boneIndex = -1;

@@ -60,11 +60,12 @@ public:
 	virtual float GetFlexWeight(LocalFlexController_t index);
 	virtual void SetFlexWeight(LocalFlexController_t index, float value);
 	//virtual void ApplyBoneMatrixTransform(matrix3x4_t& transform);
-	bool firsttimesetup = false;
 	Vector posadds[MAXSTUDIOBONES];
 	QAngle anglehelper[MAXSTUDIOBONES];
 	QuaternionAligned qadds[MAXSTUDIOBONES];
 	float forcedFlexes[MAXSTUDIOFLEXCTRL];
+	virtual void GetRenderBounds(Vector& theMins, Vector& theMaxs);
+	bool deltaApplied = false;
 };
 
 class CLightElement : public C_BaseEntity, public CFlashlightEffect
@@ -80,8 +81,7 @@ class CCameraElement : public C_PointCamera
 {
 	DECLARE_CLASS(CCameraElement, C_PointCamera);
 public:
-	CCameraElement();
-	~CCameraElement();
+	void SetActive(bool active);
 };
 
 #endif

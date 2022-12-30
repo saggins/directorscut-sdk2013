@@ -34,10 +34,10 @@ public:
 	{
 		return m_version;
 	}
-protected:
 	int m_major;
 	int m_minor;
 	int m_patch;
+protected:
 	char* m_version;
 };
 
@@ -64,6 +64,7 @@ public:
 	void Perspective(float fov, float aspect, float znear, float zfar, float* m16);
 	void OrthoGraphic(const float l, float r, float b, const float t, float zn, const float zf, float* m16);
 	void LookAt(const float* eye, const float* at, const float* up, float* m16);
+	void SetDefaultSettings();
 	float cameraView[16];
 	float cameraProjection[16];
 	float identityMatrix[16];
@@ -88,10 +89,11 @@ public:
 	QAngle deltaAngles;
 	QAngle poseBoneAngles;
 	CUtlVector < CElementPointer* > elements;
-	Version directorcut_version = Version(0, 1, 5);
+	Version directorcut_version = Version(0, 1, 6);
 	char* directorscut_author = "KiwifruitDev";
 	char modelName[CHAR_MAX];
 	char lightTexture[CHAR_MAX];
+	char savePath[MAX_PATH];
 	int elementIndex = -1;
 	int nextElementIndex = -1;
 	int boneIndex = -1;
@@ -114,7 +116,7 @@ public:
 	bool windowVisibilities[2];
 	bool inspectorDocked = true;
 	bool gotInput = false;
-	KeyValues* settings = new KeyValues("DirectorsCut_Settings");
+	bool savedOnce = false;
 };
 
 // singleton

@@ -32,6 +32,7 @@ CElementPointer::CElementPointer(DAG_ type, KeyValues* params)
 	strcpy(name, "\0");
 	SetType(type);
 	Vector pivot = Vector(params->GetFloat("pivotX"), params->GetFloat("pivotY"), params->GetFloat("pivotZ"));
+	
 	switch (type)
 	{
 	case DAG_MODEL:
@@ -79,6 +80,28 @@ CElementPointer::CElementPointer(DAG_ type, KeyValues* params)
 		pEntity->SetModel(modelName);
 		pEntity->SetModelName(modelName);
 		pEntity->SetAbsOrigin(pivot);
+
+		KeyValues* childAngles = params->FindKey("angles", true);
+		if (childAngles != nullptr)
+		{
+			pEntity->SetAbsAngles(QAngle(childAngles->GetFloat("x"), childAngles->GetFloat("y"), childAngles->GetFloat("z")));
+		}
+
+		// TODO: check to make sure these are in range
+
+		KeyValues* child = params->FindKey("posadds", true);
+		for (KeyValues* data = child->GetFirstSubKey(); data != NULL; data = data->GetNextKey())
+		{
+			Vector posAdd = Vector(data->GetFloat("x"), data->GetFloat("y"), data->GetFloat("z"));
+			pEntity->posadds[atoi(data->GetName())] = posAdd;
+		}
+
+		KeyValues* anglehelpers = params->FindKey("anglehelper", true);
+		for (KeyValues* data = anglehelpers->GetFirstSubKey(); data != NULL; data = data->GetNextKey())
+		{
+			QAngle anglehelper = QAngle(data->GetFloat("x"), data->GetFloat("y"), data->GetFloat("z"));
+			pEntity->anglehelper[atoi(data->GetName())] = anglehelper;
+		}
 
 		pEntity->Spawn();
 
@@ -188,6 +211,12 @@ CModelElement::~CModelElement()
 {
 }
 
+void CModelElement::GetRenderBounds(Vector& theMins, Vector& theMaxs)
+{
+	VectorCopy(Vector(-16384, -16384, -16384), theMins);
+	VectorCopy(Vector(16384, 16384, 16384), theMaxs);
+}
+
 float CModelElement::GetFlexWeight(LocalFlexController_t index)
 {
 	if (index >= 0 && index < GetNumFlexControllers())
@@ -224,6 +253,7 @@ void CModelElement::PoseBones(int bonenumber, Vector pos, QAngle ang)
 {
 	posadds[bonenumber] = pos;
 	anglehelper[bonenumber] = ang;
+	deltaApplied = true;
 }
 	
 
@@ -231,21 +261,11 @@ bool CModelElement::SetupBones(matrix3x4_t* pBoneToWorldOut, int nMaxBones, int 
 {
 	for (int i = 0; i < MAXSTUDIOBONES; i++)
 	{
-		if (firsttimesetup == false)
-		{
-			posadds[i].x = 0;
-			posadds[i].y = 0;
-			posadds[i].z = 0;
-			anglehelper[i].x = 0;
-			anglehelper[i].y = 0;
-			anglehelper[i].z = 0;
-		}
 		AngleQuaternion(anglehelper[i], qadds[i]);
 	}
-	firsttimesetup = true;
 	m_BoneAccessor.SetWritableBones(BONE_USED_BY_ANYTHING);
 	m_BoneAccessor.SetReadableBones(BONE_USED_BY_ANYTHING);
-	return C_BaseFlex::SetupBones(pBoneToWorldOut, nMaxBones, boneMask, currentTime, true, posadds, qadds);
+	return C_BaseFlex::SetupBones(pBoneToWorldOut, nMaxBones, boneMask, currentTime, deltaApplied, posadds, qadds);
 }
 
 inline matrix3x4_t& CModelElement::GetBoneForWrite(int iBone)
@@ -362,7 +382,6 @@ CModelElement* CModelElement::CreateRagdollCopy()
 	}
 
 	// Copy posadds/qadds
-	copy->firsttimesetup = firsttimesetup;
 	for (int i = 0; i < MAXSTUDIOBONES; i++)
 	{
 		copy->posadds[i].x = posadds[i].x;
@@ -505,12 +524,4 @@ void CLightElement::UpdateLight(const Vector& vecPos, const Vector& vecDir, cons
 	}
 
 	g_pClientShadowMgr->UpdateProjectedTexture(GetFlashlightHandle(), true);
-}
-
-CCameraElement::CCameraElement()
-{
-}
-
-CCameraElement::~CCameraElement()
-{
 }

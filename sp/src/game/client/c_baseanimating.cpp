@@ -1676,10 +1676,19 @@ void C_BaseAnimating::BuildTransformations( CStudioHdr *hdr, Vector *pos, Quater
 		{
 			if (leaveoutbonecalc)
 			{
-				pos[i].x += addpos[i].y;
-				pos[i].y += addpos[i].y;
-				pos[i].z += addpos[i].z;
-				QuaternionMult(q[i], addq[i], q[i]);
+				// use override bone positions
+				pos[i].x = addpos[i].x;
+				pos[i].y = addpos[i].y;
+				pos[i].z = addpos[i].z;
+				q[i] = addq[i];
+			}
+			else
+			{
+				// set bone overrides so they're ready when needed
+				addpos[i].x = pos[i].x;
+				addpos[i].y = pos[i].y;
+				addpos[i].z = pos[i].z;
+				addq[i] = q[i];
 			}
 			QuaternionMatrix( q[i], pos[i], bonematrix );
 
