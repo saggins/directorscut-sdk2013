@@ -6,7 +6,7 @@ Rebuilding the Source Filmmaker from scratch. By the community, for the communit
 
 - [GitHub](https://github.com/teampopplio/directorscut)
 - [Twitter](https://twitter.com/SFMDirectorsCut)
-- [Discord](discord.gg/3X3teNecWs)
+- [Discord](https://discord.gg/3X3teNecWs)
 
 ## Installation
 
